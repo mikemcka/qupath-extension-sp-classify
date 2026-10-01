@@ -1,6 +1,6 @@
 # Install & launch
 
-1. **Download** `qupath-extension-sp-classify-0.3.1-all.jar` from the [Releases page](https://github.com/mikemcka/qupath-extension-sp-classify/releases), or build it from source — see [CLAUDE.md](https://github.com/mikemcka/qupath-extension-sp-classify/blob/main/CLAUDE.md).
+1. **Download** `qupath-extension-sp-classify-0.3.2-all.jar` from the [Releases page](https://github.com/mikemcka/qupath-extension-sp-classify/releases), or build it from source — see [CLAUDE.md](https://github.com/mikemcka/qupath-extension-sp-classify/blob/main/CLAUDE.md).
 2. Delete any older `qupath-extension-sp-classify-*-all.jar` from QuPath's extensions folder. If an old copy stays there, QuPath may load it instead of the new one. Then copy the new JAR into the folder, or drag it onto the QuPath window:
    - Windows: `C:\Users\<you>\QuPath\v0.7\extensions\`
    - Linux: `~/.local/share/QuPath/v0.7/extensions/`
