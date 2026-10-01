@@ -5,18 +5,25 @@ package qupath.ext.spclassify.classifier;
  * Any combination of two different types can be used for the disagreement paradigm.
  */
 public enum ModelType {
-    XGBOOST("XGBoost"),
-    LIGHTGBM("LightGBM"),
-    RANDOM_FOREST("Random Forest");
+    XGBOOST("XGBoost", "XGB"),
+    LIGHTGBM("LightGBM", "LGB"),
+    RANDOM_FOREST("Random Forest", "RF");
 
     private final String displayName;
+    private final String shortName;
 
-    ModelType(String displayName) {
+    ModelType(String displayName, String shortName) {
         this.displayName = displayName;
+        this.shortName = shortName;
     }
 
     public String getDisplayName() {
         return displayName;
+    }
+
+    /** Abbreviation for compact UI labels (review buttons): XGB, LGB, RF. */
+    public String getShortName() {
+        return shortName;
     }
 
     @Override

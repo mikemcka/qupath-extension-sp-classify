@@ -29,7 +29,9 @@ To label a cell that is not in the queue, click it in the viewer. Ctrl-click (Cm
 **Toolbar buttons during review:**
 - **Previous** / **Next** / **Skip**: move through the queue.
 - **XGB: CD8 (87%)** (blue): accept Model 1's prediction.
-- **LGB: CD4 (65%)** (pink): accept Model 2's prediction. The two buttons are labelled XGB and LGB even if you chose Random Forest for either model.
+- **LGB: CD4 (65%)** (pink): accept Model 2's prediction.
+
+Each button starts with its model's type: **XGB** (XGBoost), **LGB** (LightGBM) or **RF** (Random Forest). If both models are the same type, the buttons read e.g. **RF 1** and **RF 2**.
 - **Both: CD8 (90%)**: shown instead of the two buttons when the models agree. The percentage is the mean of the two models' confidence.
 - **Avg: Treg** (green, no percentage): shown only when averaging the two models' probabilities gives a class that neither model chose. Click it to accept that class.
 - **All Classes ▼**: choose any other class.

@@ -27,6 +27,7 @@ import javafx.stage.Stage;
 import javax.imageio.ImageIO;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import qupath.ext.spclassify.classifier.ModelType;
 import qupath.ext.spclassify.io.ProjectStateManager;
 import qupath.ext.spclassify.model.CellPrediction;
 import qupath.ext.spclassify.model.LabelStore;
@@ -36,7 +37,7 @@ import qupath.lib.gui.QuPathGUI;
 /**
  * JavaFX window that renders an inter-model confusion matrix.
  * <p>
- * Rows = Model 1 (XGBoost) predictions, Columns = Model 2 (LightGBM) predictions.
+ * Rows = Model 1 predictions, Columns = Model 2 predictions (XGBoost / LightGBM by default).
  * Diagonal cells show agreement counts; off-diagonal cells show disagreement counts.
  * Cells are colour-coded by magnitude (darker = more cells). Per-class agreement
  * rates are shown in the margins.
@@ -51,7 +52,7 @@ public class ConfusionMatrixView {
 
     /** Display modes for the confusion matrix. */
     public enum Mode {
-        /** Rows = Model 1 (XGBoost), Columns = Model 2 (LightGBM). Inter-model agreement. */
+        /** Rows = Model 1, Columns = Model 2. Inter-model agreement. */
         INTER_MODEL
     }
 
@@ -85,8 +86,10 @@ public class ConfusionMatrixView {
     private double[] displayColTpRate; // per-col TP / col sum
     private int totalCells;
     private int totalAgreements;
-    private String rowAxisTitle = "Model 1 (XGBoost)";
-    private String colAxisTitle = "Model 2 (LightGBM)";
+    private ModelType model1Type;
+    private ModelType model2Type;
+    private String rowAxisTitle = ModelLabels.full(1, null);
+    private String colAxisTitle = ModelLabels.full(2, null);
 
     // Layout constants
     private static final int CELL_SIZE = 64;
@@ -252,6 +255,18 @@ public class ConfusionMatrixView {
     }
 
     /** Show the confusion matrix window. */
+    /**
+     * Label the axes with the classifier's actual model types (default XGBoost / LightGBM when
+     * null). Call before {@link #show()}; redraws if already built.
+     */
+    public void setModelTypes(ModelType model1, ModelType model2) {
+        this.model1Type = model1;
+        this.model2Type = model2;
+        rowAxisTitle = ModelLabels.full(1, model1);
+        colAxisTitle = ModelLabels.full(2, model2);
+        if (canvas != null) drawMatrix();
+    }
+
     public void show() {
         stage.show();
         stage.toFront();
@@ -332,8 +347,8 @@ public class ConfusionMatrixView {
             total = interModelTotal;
             agreements = interModelAgreements;
         }
-        rowAxisTitle = "Model 1 (XGBoost)";
-        colAxisTitle = "Model 2 (LightGBM)";
+        rowAxisTitle = ModelLabels.full(1, model1Type);
+        colAxisTitle = ModelLabels.full(2, model2Type);
         stage.setTitle("SP Classify \u2014 Inter-Model Confusion Matrix");
 
         // Per-row / per-col TP rates and per-class F1.

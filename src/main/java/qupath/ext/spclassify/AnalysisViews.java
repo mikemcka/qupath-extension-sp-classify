@@ -9,6 +9,7 @@ import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Supplier;
 import javafx.application.Platform;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -138,15 +139,19 @@ final class AnalysisViews {
      * mirrored back onto the plot. Mirrors {@link #showIntensityHeatmaps} for the
      * cell/feature/marker discovery flow.
      *
-     * @param liveCurrentPredictions the open image's in-memory predictions (may be null)
-     * @param normalizer             the session feature normalizer (may be null)
-     * @param openClassControl       callback to launch the Class Control dialog
+     * @param predictionsSupplier the open image's in-memory predictions (supplier may return null)
+     * @param normalizerSupplier  the session clustering normalizer (supplier may return null).
+     *                            Suppliers, not values, so a reopened plot and "New clustering
+     *                            session" see the current settings, not those at first launch.
+     * @param openClassControl    callback to launch the Class Control dialog
      */
     static void showScatterPlot(
             QuPathGUI qupath,
-            PopulationSet liveCurrentPredictions,
-            FeatureNormalizer normalizer,
+            Supplier<PopulationSet> predictionsSupplier,
+            Supplier<FeatureNormalizer> normalizerSupplier,
             Runnable openClassControl) {
+        PopulationSet liveCurrentPredictions = predictionsSupplier.get();
+        FeatureNormalizer normalizer = normalizerSupplier.get();
         var imageData = qupath.getImageData();
         if (imageData == null) {
             Dialogs.showErrorMessage(EXTENSION_NAME, "No image is open.");
@@ -161,8 +166,22 @@ final class AnalysisViews {
         // cells/fit are stale, so drop the old window and build fresh below.
         if (openScatterPlot != null) {
             if (openScatterPlot.isReusableFor(currentImageName)) {
-                openScatterPlot.show();
-                return;
+                if (openScatterPlot.usesNormalization(normalizer)) {
+                    openScatterPlot.show();
+                    return;
+                }
+                // Clustering Normalisation changed since this plot was built: its clusters were
+                // fitted on differently transformed values. Rebuild unless the user keeps it.
+                boolean rebuild = Dialogs.showYesNoDialog(
+                        EXTENSION_NAME,
+                        "Clustering Normalisation has changed since this scatter plot was made.\n\n"
+                                + "Build a new plot with the current normalisation? Its clusters will be "
+                                + "discarded.\n\nChoose No to keep the existing plot, which still uses the "
+                                + "previous normalisation.");
+                if (!rebuild) {
+                    openScatterPlot.show();
+                    return;
+                }
             }
             openScatterPlot.close();
             openScatterPlot = null;
@@ -203,7 +222,7 @@ final class AnalysisViews {
                 openScatterPlot.close();
                 openScatterPlot = null;
             }
-            showScatterPlot(qupath, liveCurrentPredictions, normalizer, openClassControl);
+            showScatterPlot(qupath, predictionsSupplier, normalizerSupplier, openClassControl);
         };
 
         openScatterPlot = new ScatterPlotView(

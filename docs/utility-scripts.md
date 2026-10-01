@@ -6,7 +6,7 @@ Tools for common cleanup tasks. Each one asks for its settings, then reports wha
 
 ### 13.1 Filter Cells by Size & Circularity
 
-Removes cell detections from the **current image** that fall outside size and shape limits. The dialog has **Min** and **Max** boxes for **Cell area (µm²)** and **Circularity (0–1)**. It opens with Max area = 500 and Min circularity = 0.7. Clear a box to remove that limit. A cell is removed if it breaks any limit (e.g. `area > 500` **or** `circularity < 0.7`). The tool uses the first measurement whose name contains "area" (or "circularity"). Check which one that is in your cell measurements: it may be a nucleus measurement rather than a whole-cell one. Cells missing either measurement are kept. The number of cells to be removed is shown before anything is deleted.
+Removes cell detections from the **current image** that fall outside size and shape limits. The dialog has a row for **Area** and a row for **Circularity (0–1)**. Each row has a **Measurement** dropdown and **Min** and **Max** boxes. The dropdowns list every measurement whose name contains "area" or "circularity" and start on the whole-cell measurement (`Cell: Area µm^2`, or `Cell: Area px^2` if the image is not calibrated, and `Cell: Circularity`). Change them to filter on, for example, nucleus area. Area limits are in the units of the chosen measurement. The dialog opens with Max area = 500 and Min circularity = 0.7. Clear a box to remove that limit. A cell is removed if it breaks any limit (e.g. `Cell: Area µm^2 > 500` **or** `Cell: Circularity < 0.7`). Cells missing a measurement that has a limit are kept. The number of cells to be removed is shown before anything is deleted.
 
 ### 13.2 Resolve Hierarchy
 

@@ -130,7 +130,7 @@ public final class CohortClusterModel {
             int sampleCap,
             FeatureNormalizer normalizer,
             Consumer<String> log) {
-        return sample(project, images, markers, List.of(), sampleCap, normalizer, log);
+        return sample(project, images, markers, List.of(), sampleCap, normalizer, null, log);
     }
 
     /**
@@ -146,6 +146,7 @@ public final class CohortClusterModel {
             List<String> annotationKeywords,
             int sampleCap,
             FeatureNormalizer normalizer,
+            BatchShifts batchShifts,
             Consumer<String> log) {
         Map<String, ProjectImageEntry<BufferedImage>> byName = entriesByName(project);
         int nMarkers = markers.size();
@@ -192,6 +193,10 @@ public final class CohortClusterModel {
             }
             totalCells += n;
             imageCount++;
+            // Per-image UniFORM gain (null when batch correction is off): re-set before each image.
+            if (batchShifts != null) {
+                extractor.setBatchScale(batchShifts.scaleArray(name, markers));
+            }
             float[] flat = extractor.extractMatrix(cells);
             int take = Math.min(perImage, n);
             int[] pick = sampleIndices(n, take, rng);
@@ -261,6 +266,7 @@ public final class CohortClusterModel {
             Map<Integer, PathClass> mapping,
             String classFilter,
             FeatureNormalizer normalizer,
+            BatchShifts batchShifts,
             ImageData<BufferedImage> openData,
             String openName,
             Consumer<String> log,
@@ -275,6 +281,7 @@ public final class CohortClusterModel {
                 mapping,
                 classFilter,
                 normalizer,
+                batchShifts,
                 openData,
                 openName,
                 log,
@@ -330,6 +337,7 @@ public final class CohortClusterModel {
             Map<Integer, PathClass> mapping,
             String classFilter,
             FeatureNormalizer normalizer,
+            BatchShifts batchShifts,
             ImageData<BufferedImage> openData,
             String openName,
             Consumer<String> log,
@@ -344,6 +352,7 @@ public final class CohortClusterModel {
                 mapping,
                 classFilter,
                 normalizer,
+                batchShifts,
                 openData,
                 openName,
                 log,
@@ -377,6 +386,7 @@ public final class CohortClusterModel {
             UnaryOperator<double[][]> queryProjector,
             String classFilter,
             FeatureNormalizer normalizer,
+            BatchShifts batchShifts,
             ImageData<BufferedImage> openData,
             String openName,
             Consumer<String> log,
@@ -390,6 +400,7 @@ public final class CohortClusterModel {
                 sd,
                 classFilter,
                 normalizer,
+                batchShifts,
                 openData,
                 openName,
                 log,
@@ -428,6 +439,7 @@ public final class CohortClusterModel {
             UnaryOperator<double[][]> queryProjector,
             String classFilter,
             FeatureNormalizer normalizer,
+            BatchShifts batchShifts,
             ImageData<BufferedImage> openData,
             String openName,
             Consumer<String> log,
@@ -441,6 +453,7 @@ public final class CohortClusterModel {
                 sd,
                 classFilter,
                 normalizer,
+                batchShifts,
                 openData,
                 openName,
                 log,
@@ -465,6 +478,7 @@ public final class CohortClusterModel {
             double[] sd,
             String classFilter,
             FeatureNormalizer normalizer,
+            BatchShifts batchShifts,
             ImageData<BufferedImage> openData,
             String openName,
             Consumer<String> log,
@@ -511,6 +525,10 @@ public final class CohortClusterModel {
                 done++;
                 progress.accept(done / (double) images.size());
                 continue;
+            }
+            // Per-image UniFORM gain (null when batch correction is off): re-set before each image.
+            if (batchShifts != null) {
+                extractor.setBatchScale(batchShifts.scaleArray(name, markers));
             }
             float[] flat = extractor.extractMatrix(cells);
 
@@ -616,6 +634,7 @@ public final class CohortClusterModel {
             Map<Integer, PathClass> mapping,
             String classFilter,
             FeatureNormalizer normalizer,
+            BatchShifts batchShifts,
             ImageData<BufferedImage> openData,
             String openName,
             Consumer<String> log,
@@ -662,6 +681,10 @@ public final class CohortClusterModel {
                 done++;
                 progress.accept(done / (double) images.size());
                 continue;
+            }
+            // Per-image UniFORM gain (null when batch correction is off): re-set before each image.
+            if (batchShifts != null) {
+                extractor.setBatchScale(batchShifts.scaleArray(name, markers));
             }
             float[] flat = extractor.extractMatrix(cells);
 

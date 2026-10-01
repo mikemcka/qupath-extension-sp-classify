@@ -17,9 +17,11 @@ import java.util.List;
 import java.util.ResourceBundle;
 import java.util.zip.GZIPInputStream;
 import javafx.application.Platform;
+import javafx.collections.FXCollections;
 import javafx.geometry.Insets;
 import javafx.scene.control.ButtonType;
 import javafx.scene.control.CheckBox;
+import javafx.scene.control.ComboBox;
 import javafx.scene.control.Dialog;
 import javafx.scene.control.Hyperlink;
 import javafx.scene.control.Label;
@@ -82,6 +84,24 @@ final class UtilityScripts {
             return;
         }
 
+        // Which measurements to filter on. Offer every measurement whose name contains
+        // "area" / "circularity" and pre-select the whole-cell one, so the user sees (and can
+        // change) exactly what is used instead of the first name that happens to match.
+        List<String> names = measurementNamesSample(cells);
+        List<String> areaOptions = measurementsContaining(names, "area");
+        List<String> circOptions = measurementsContaining(names, "circularity");
+        if (areaOptions.isEmpty() && circOptions.isEmpty()) {
+            Dialogs.showErrorMessage(
+                    EXTENSION_NAME, "The cells have no area or circularity measurements to filter on.");
+            return;
+        }
+        ComboBox<String> areaCombo = new ComboBox<>(FXCollections.observableArrayList(areaOptions));
+        areaCombo.setValue(preferredMeasurement(areaOptions, "area"));
+        areaCombo.setDisable(areaOptions.isEmpty());
+        ComboBox<String> circCombo = new ComboBox<>(FXCollections.observableArrayList(circOptions));
+        circCombo.setValue(preferredMeasurement(circOptions, "circularity"));
+        circCombo.setDisable(circOptions.isEmpty());
+
         // Build the threshold dialog: min/max for both area and circularity.
         TextField minAreaField = new TextField();
         minAreaField.setPromptText("none");
@@ -94,14 +114,22 @@ final class UtilityScripts {
         grid.setHgap(8);
         grid.setVgap(8);
         grid.setPadding(new Insets(10));
-        grid.add(new Label("Min"), 1, 0);
-        grid.add(new Label("Max"), 2, 0);
-        grid.add(new Label("Cell area (\u00b5m\u00b2)"), 0, 1);
-        grid.add(minAreaField, 1, 1);
-        grid.add(maxAreaField, 2, 1);
+        grid.add(new Label("Measurement"), 1, 0);
+        grid.add(new Label("Min"), 2, 0);
+        grid.add(new Label("Max"), 3, 0);
+        grid.add(new Label("Area"), 0, 1);
+        grid.add(areaCombo, 1, 1);
+        grid.add(minAreaField, 2, 1);
+        grid.add(maxAreaField, 3, 1);
         grid.add(new Label("Circularity (0\u20131)"), 0, 2);
-        grid.add(minCircField, 1, 2);
-        grid.add(maxCircField, 2, 2);
+        grid.add(circCombo, 1, 2);
+        grid.add(minCircField, 2, 2);
+        grid.add(maxCircField, 3, 2);
+        Label unitNote = new Label("Area bounds are in the units of the chosen measurement (\u00b5m\u00b2 for "
+                + "names ending \"\u00b5m^2\", pixels for \"px^2\").");
+        unitNote.setWrapText(true);
+        unitNote.setMaxWidth(460);
+        grid.add(unitNote, 0, 3, 4, 1);
 
         Dialog<ButtonType> dialog = new Dialog<>();
         dialog.setTitle(EXTENSION_NAME);
@@ -126,19 +154,32 @@ final class UtilityScripts {
             Dialogs.showInfoNotification(EXTENSION_NAME, "No thresholds specified; nothing to filter.");
             return;
         }
+        boolean useArea = minArea != null || maxArea != null;
+        boolean useCirc = minCirc != null || maxCirc != null;
+        String areaName = areaCombo.getValue();
+        String circName = circCombo.getValue();
+        if ((useArea && areaName == null) || (useCirc && circName == null)) {
+            Dialogs.showErrorMessage(
+                    EXTENSION_NAME,
+                    "No " + (useArea && areaName == null ? "area" : "circularity")
+                            + " measurement is available for the bound you entered.");
+            return;
+        }
 
         List<String> criteria = new ArrayList<>();
-        if (minArea != null) criteria.add(String.format("area < %.1f", minArea));
-        if (maxArea != null) criteria.add(String.format("area > %.1f", maxArea));
-        if (minCirc != null) criteria.add(String.format("circularity < %.2f", minCirc));
-        if (maxCirc != null) criteria.add(String.format("circularity > %.2f", maxCirc));
+        if (minArea != null) criteria.add(String.format("%s < %.1f", areaName, minArea));
+        if (maxArea != null) criteria.add(String.format("%s > %.1f", areaName, maxArea));
+        if (minCirc != null) criteria.add(String.format("%s < %.2f", circName, minCirc));
+        if (maxCirc != null) criteria.add(String.format("%s > %.2f", circName, maxCirc));
         String criteriaText = String.join(" or ", criteria);
 
         int missing = 0;
         List<PathObject> toRemove = new ArrayList<>();
         for (PathObject cell : cells) {
-            double area = measurementContaining(cell, "area");
-            double circ = measurementContaining(cell, "circularity");
+            var ml = cell.getMeasurementList();
+            // Only the measurements that have a bound need to be present.
+            double area = useArea ? ml.get(areaName) : 0;
+            double circ = useCirc ? ml.get(circName) : 0;
             if (Double.isNaN(area) || Double.isNaN(circ)) {
                 missing++;
                 continue;
@@ -164,9 +205,7 @@ final class UtilityScripts {
                         toRemove.size(),
                         cells.size(),
                         criteriaText,
-                        missing > 0
-                                ? "\n\n" + missing + " cell(s) skipped (missing area/circularity measurements)."
-                                : ""));
+                        missing > 0 ? "\n\n" + missing + " cell(s) skipped (missing the chosen measurement)." : ""));
         if (!confirm) return;
 
         hierarchy.removeObjects(toRemove, true);
@@ -185,19 +224,57 @@ final class UtilityScripts {
                 missing);
     }
 
-    /**
-     * Return the value of the first measurement whose name contains {@code substring}
-     * (case-insensitive), or {@link Double#NaN} if none match.
-     */
-    private static double measurementContaining(PathObject cell, String substring) {
-        var ml = cell.getMeasurementList();
+    /** Measurement names from the first cells (lists are normally identical across a run). */
+    private static List<String> measurementNamesSample(List<PathObject> cells) {
+        java.util.Set<String> names = new java.util.LinkedHashSet<>();
+        for (int i = 0; i < Math.min(cells.size(), 200); i++) {
+            names.addAll(cells.get(i).getMeasurementList().getMeasurementNames());
+        }
+        return new ArrayList<>(names);
+    }
+
+    /** Names containing {@code substring} (case-insensitive), in their original order. */
+    static List<String> measurementsContaining(List<String> names, String substring) {
         String needle = substring.toLowerCase(java.util.Locale.ROOT);
-        for (String name : ml.getMeasurementNames()) {
-            if (name.toLowerCase(java.util.Locale.ROOT).contains(needle)) {
-                return ml.get(name);
+        List<String> out = new ArrayList<>();
+        for (String n : names) {
+            if (n != null && n.toLowerCase(java.util.Locale.ROOT).contains(needle)) out.add(n);
+        }
+        return out;
+    }
+
+    /**
+     * The measurement to pre-select for {@code kind} ("area" / "circularity"): the whole-cell one
+     * ({@code Cell: Area µm^2} before {@code Cell: Area px^2}), then any other {@code Cell:} match,
+     * then a name with no compartment prefix (plain detections), then any non-compartment match,
+     * and only then a nucleus/cytoplasm/membrane measurement.
+     */
+    static String preferredMeasurement(List<String> options, String kind) {
+        if (options == null || options.isEmpty()) return null;
+        String k = kind.toLowerCase(java.util.Locale.ROOT);
+        String bestCell = null;
+        String bareMatch = null;
+        for (String n : options) {
+            String lower = n.toLowerCase(java.util.Locale.ROOT);
+            if (lower.startsWith("cell: " + k)) {
+                if (lower.contains("\u00b5m") || lower.contains("um^2")) return n;
+                if (bestCell == null) bestCell = n;
+            } else if (bareMatch == null && lower.startsWith(k)) {
+                bareMatch = n;
             }
         }
-        return Double.NaN;
+        if (bestCell != null) return bestCell;
+        for (String n : options) {
+            if (n.toLowerCase(java.util.Locale.ROOT).startsWith("cell:")) return n;
+        }
+        if (bareMatch != null) return bareMatch;
+        for (String n : options) {
+            String lower = n.toLowerCase(java.util.Locale.ROOT);
+            if (!lower.startsWith("nucleus:") && !lower.startsWith("cytoplasm:") && !lower.startsWith("membrane:")) {
+                return n;
+            }
+        }
+        return options.get(0);
     }
 
     /**

@@ -13,9 +13,10 @@ cluster."* Click **Recompute** to cluster and draw the plot.
 
 > Clustering uses the normalisation set in **Clustering Normalisation**
 > (§[4.2](setup.md#42-clustering-normalisation)). The classifier always uses raw values. Each
-> marker is then z-scored over the cells being clustered. Set the normalisation before
-> you open this window: a plot keeps the normalisation it was built with, and
-> reopening it from the menu or clicking **New clustering session** does not update it.
+> marker is then z-scored over the cells being clustered. If you change the normalisation
+> while a plot exists, reopening the plot from the menu asks whether to build a new plot
+> with the new normalisation (the current clusters are discarded) or keep the existing
+> plot. **New clustering session** always uses the current normalisation.
 
 ### 11.1 Controls
 
@@ -213,7 +214,9 @@ the sample are assigned, see §[11.6](#116-clustering-method-k-means-vs-leiden).
 > **Staining differences between images.** Normalisation is applied per marker, not
 > per image. If one slide is stained brighter than the others, its cells can fall
 > into different clusters. Check the per-image intensity distributions before
-> pooling.
+> pooling, and use batch normalisation (§[19](batch-normalisation.md)) with
+> **Use batch-corrected values** ticked to correct them. The scatter plot then uses the
+> corrected values in every scope and for every assign and write.
 
 **Leiden in project scope: Cluster all cells / Transfer from sample**
 
