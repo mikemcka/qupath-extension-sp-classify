@@ -292,15 +292,13 @@ public class ClassificationPanel extends VBox {
                 new Tooltip("After training, compute and display top 10 features by mean |SHAP| value per class"));
 
         autoPruneCheckBox.setSelected(true);
-        autoPruneCheckBox.setTooltip(new Tooltip("After labels are pooled across images and normalised, examine the\n"
-                + "full training matrix and drop features that are near-constant or\n"
-                + "highly correlated with another feature from the same marker.\n"
-                + "Pruning on the pooled set (not just the current image) means a\n"
-                + "feature is only dropped when it is redundant across the whole\n"
-                + "cohort. Rare-marker guardrail keeps the best feature for any marker\n"
-                + "that would otherwise be dropped entirely. The full measurement set\n"
-                + "on disk is never touched — only the columns used by this training\n"
-                + "run are reduced."));
+        autoPruneCheckBox.setTooltip(new Tooltip("Before each training run, remove features that are almost constant\n"
+                + "or are highly correlated with another feature of the same marker.\n"
+                + "Checked on the raw values of the labelled cells (including cells\n"
+                + "pooled from other images when \"Pool labels from all images\" is\n"
+                + "ticked). The 5 highest-variance features of each marker are always\n"
+                + "kept. Only the columns used for this run are reduced; the\n"
+                + "measurements in your images are not changed."));
 
         // ── Status row ──
         clearImportedButton.setTooltip(

@@ -1,19 +1,19 @@
 # Tips, tricks and known limitations
 
-- **Label at least 20–30 cells per class** before the first Train, then trust the disagreement-driven Review Mode to grow your label set efficiently.
-- **Selecting cells** Hold Ctrl key on windows/linux or Command on Mac to select multiple cells at the same time to label.
-- **Channel Viewer** View > Channel viewer is very useful, it will display a view of the target area which all channels selected in channel select displayed.
-- **Resolve hierarchy before exporting** We also have noticed a bug where parent annotations are missing for exported cells, ContainingAnnotations will display them correctly.
-- **F1 scores can lie.** A held-out 20% split is honest within an image but optimistic across the project. Always sanity-check on a few unseen slides before believing the metrics.
-- **Pick different model types for Model 1 and Model 2.** Two XGBoosts won't disagree much, which kills the whole point.
-- **Images at once caps at 8.** Expect ~2–4 GB of memory per image on COMET data. It's a different thing from **CPU threads** — see §5.3.
-- **If training feels slow, read the log first.** Every run ends with a "Where the time went" table in `<project>/celltune/logs/`. It tells you which step to actually do something about instead of guessing.
-- **The channel mapping persists per project.** It's saved to `<project>/celltune/marker-table.json` (from the [Channel Mapping editor](marker-table.md) or a CSV import) and reloaded automatically when you reopen the project, so auto-channel-switching during review survives QuPath restarts — no re-import needed. Each project keeps its own; to reuse one elsewhere, *Export CSV…* and import it in the other project. (*Reset Project State* clears it along with the rest of the `celltune/` folder.)
-- **Fixing a CSV that picks the wrong channels.** Open *Channel Mapping (Review Display)...*, **Import CSV…**, look for `~` / `!` / `✗` rows, fix the ticks, **Pin all matches**, **Save**. Details in [Marker table format](marker-table.md#fixing-a-csv-that-picks-the-wrong-channels).
-- **Project Prediction Summary needs ≥5 images** to give meaningful robust z-scores. On 2–3 image projects, treat the Anomaly column as overview or guide.
-- **Composite class colours.** Without "Prepend primary", QuPath generates a colour per unique composite name — you can end up with hundreds. Tick "Prepend primary" and your existing multi-class palette is preserved.
-- **No `.qpdata` save** when navigating from Project Prediction Summary — this is deliberate (saving large slides is slow and pointless for navigation). Manually save the image after editing it.
+- **Label at least 20–30 cells per class** before the first Train. Then use Review Mode to add labels where the two models disagree.
+- **Select several cells at once:** hold Ctrl (Windows/Linux) or Cmd (Mac) while clicking cells, then apply a label.
+- **Channel viewer:** *View → Channel viewer* shows the area under the cursor in every selected channel side by side.
+- **Run Resolve Hierarchy before exporting.** Without it, the `ParentAnnotations` column can be empty for some cells in exports; `ContainingAnnotations` still lists them. Run *Utility Scripts → Resolve Hierarchy...* first (§[13.2](utility-scripts.md#132-resolve-hierarchy)).
+- **Training Metrics overestimate accuracy on new images.** The 20% held-out cells come from the same images used for training. Check predictions on a few images with no labels before relying on the scores.
+- **Use different model types for Model 1 and Model 2.** Two models of the same type rarely disagree, so Review Mode finds few cells to review.
+- **Images at once is limited to 8.** Each image needs about 2–4 GB of memory on COMET data. This setting is separate from **CPU threads** — see §5.3.
+- **If training is slow, check the log.** Each run's log (`<project>/celltune/logs/training-<timestamp>.log`, last 20 kept) ends with a "Where the time went" table showing how long each step took.
+- **Channel mapping is saved per project** in `celltune/marker-table.json` and reloads when you reopen the project. To use it in another project, click **Export CSV…** in the [Channel Mapping editor](marker-table.md) and import that CSV there. *Reset Project State* deletes it with the rest of `celltune/`.
+- **Fixing a CSV that picks the wrong channels.** Open *Channel Mapping (Review Display)...*, click **Import CSV…**, find rows marked `~`, `!` or `✗`, correct the ticks, click **Pin all matches**, then **Save**. Details in [Marker table format](marker-table.md#fixing-a-csv-that-picks-the-wrong-channels).
+- **Project Prediction Summary needs at least 5 images** for reliable robust z-scores. With 2–3 images, use the Anomaly column only as a rough guide.
+- **Composite class colours.** Without **Prepend current primary classification (colour follows primary)**, QuPath creates a colour for each composite name, which can mean hundreds of colours. Tick it to keep your existing class colours.
+- **Opening an image from Project Prediction Summary does not save the current image.** Save it yourself (Ctrl+S) before you switch if you have edited it.
 
 ---
 
-*Spot a missing step or an inaccurate label? Open an issue on the GitHub repo. Screenshots welcome.*
+*Found a missing step or a wrong label? Open an issue on the GitHub repo. Screenshots welcome.*

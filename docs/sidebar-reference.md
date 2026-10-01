@@ -2,48 +2,43 @@
 
 | Control | Default | What it does |
 |---|---|---|
-| **Rounds** | 500 | Maximum boosting rounds (50–1000). With Early stopping on this is a **limit**, not a target — models stop when they stop improving, so it usually costs nothing. With Early stopping **off** it is used literally; lower it. |
-| **Max depth** | 6 | Tree depth (2–15). Higher = more complex interactions, more overfit risk. |
-| **CPU threads** | 0 (all) | How many compute resources training may use. 0 = all of it. Lower it to keep working while training runs. Remembered between sessions. See §5.3. |
-| **Images at once** | 1 | How many images are classified at once *after* training (1–8). Uses memory, not processor. Doesn't affect training itself. |
-| **Model 1** | XGBoost | First ensemble model. |
-| **Model 2** | LightGBM | Second ensemble model. **Pick a different type** for meaningful disagreement. |
-| **Pool labels from all images** | ✅ | Train on labels from every image; auto-on/locked in binary mode. |
-| **Enable data balancing** | ✅ | Apply resampling. Hides the strategy dropdown when off. |
-| **Strategy** | SMOTE + Tomek | Resampling algorithm — see §5.4 table. |
-| **Auto-tune hyperparameters** | ❌ | Automatically searches for better settings by training **200 models**. Hours on a big panel — plan for overnight. |
-| **Early stopping** | ✅ | Stops training once the model stops improving, so you don't waste time. |
-| **Train/val metrics** | ✅ | Produces the **Training Metrics** report. Costs about a third of training time; untick it to train faster and go without the report. |
-| **Show top 10 feature importance after training** | ✅ | Auto-open SHAP plot after training. |
-| **Auto-prune features** | ✅ | Drop near-constant & redundant features across the pooled, normalised training set before training; the top 5 highest-variance features per group are always kept. Non-destructive. See §[4.1](setup.md#41-select-features). |
-| **Restrict to features shared with imported data** | ❌ | Case-insensitive intersection with imported ground-truth columns. |
-| **Sample current image only** | ❌ | Restrict sampling/review to the open image. |
-| **Filter by annotation keywords** | (blank) | Comma-separated substring filter on annotation names. |
-| **Apply to which images...** | (all) | Open dual-list selector. Button label updates with count. |
-| **Manual Label Mode** | — | Open floating labelling toolbar. |
-| **Train** | — | Start training. Requires ≥10 labelled cells. |
-| **Plot Confusion...** | (disabled) | Inter-model agreement matrix. Unlocks after training. |
-| **Training Metrics** | (disabled) | Per-class precision/recall/F1 on 20% held-out split (≥20 labelled cells). |
-| **Feature Importance...** | (disabled) | SHAP top-N per class. Unlocks after training. |
-| **Enter Review Mode** | (disabled) | Sample disagreement cells for human review. Unlocks after predictions exist. |
+| **Rounds** | 500 | Maximum boosting rounds (50–1000). With **Early stopping** ticked, training stops sooner when the model stops improving, so a high value costs little. With it unticked, every round is used; lower the value. |
+| **Max depth** | 6 | Maximum tree depth (2–15). Higher values model more complex marker combinations but overfit more easily. |
+| **CPU threads** | 0 (all) | Number of CPU threads training uses; 0 = all cores. Lower it to keep QuPath responsive during training. Remembered between sessions. See §5.3. |
+| **Images at once** | 1 | Number of images classified at the same time by **Apply to which images...** after training (1–8). Each image is loaded whole, so higher values use more memory. Does not affect training. |
+| **Model 1** | XGBoost | First model type. |
+| **Model 2** | LightGBM | Second model type. Use a different type from Model 1, so the two models disagree on uncertain cells. |
+| **Pool labels from all images** | ✅ | Train on labelled cells from every project image. Always on in binary mode. |
+| **Enable data balancing** | ✅ | Resample the training set to balance the classes. Untick to hide **Strategy**. |
+| **Strategy** | SMOTE + Tomek | Resampling method — see the §5.4 table. |
+| **Auto-tune hyperparameters** | ❌ | Searches for better model settings. Cost = 2 × Trials × CV folds model fits (200 at the defaults). This can take several hours on a panel with many features. |
+| **Trials** | 20 | Settings combinations tried per model (5–100). Shown only when Auto-tune is ticked. |
+| **CV folds** | 5 | Cross-validation folds used to score each combination (2–10). Shown only when Auto-tune is ticked. |
+| **Early stopping** | ✅ | Stops adding rounds when the score on held-out cells has not improved for 20 rounds. |
+| **Train/val metrics** | ✅ | Produces the **Training Metrics** report. Adds about a third to training time. Untick to train faster without the report. |
+| **Show top 10 feature importance after training** | ✅ | Opens the SHAP feature-importance plot after training. |
+| **Auto-prune features (drop near-constant & redundant)** | ✅ | Before training, removes features that are almost constant or highly correlated with another feature of the same marker. The 5 highest-variance features of each marker are always kept. Runs only when more than 20 features are selected. Image measurements are not changed. See §[4.1](setup.md#41-select-features). |
+| **Restrict to features shared with imported data** | ❌ | Train only on features that also exist in the imported ground-truth columns (names matched ignoring case). |
+| **Sample current image only** | ❌ | Sample and review cells from the open image only. |
+| **Filter by annotation keywords** | (blank) | Comma-separated keywords. Only cells inside annotations whose names contain a keyword (any case) are sampled for review. |
+| **Apply to which images...** | (all) | Choose the project images the trained classifier is applied to. The button label shows how many are selected. |
+| **Manual Label Mode** | — | Opens the floating labelling toolbar. |
+| **Train** | — | Starts training. Needs at least 10 labelled cells. |
+| **Agreement Confusion Matrix** | (disabled) | Shows how often the two models agree, per class. Available after training. |
+| **Training Metrics** | (disabled) | Per-class precision, recall and F1 on a 20% held-out split. Available after training with **Train/val metrics** ticked and at least 20 labelled cells. |
+| **Feature Importance...** | (disabled) | SHAP top features per class. Available after training. |
+| **Enter Review Mode** | (disabled) | Samples cells where the two models disagree, for you to review. Available once predictions exist. |
 
 ### 14.1 Reference: preferences
 
-Under **Edit → Preferences → SP Classify**. These are set once and left alone, which is why they aren't in the sidebar.
+Under **Edit → Preferences → SP Classify**.
 
 | Preference | Default | What it does |
 |---|---|---|
-| **Enable** | ✅ | Turn the extension off without uninstalling it. |
-| **XGBoost histogram bins** | 0 | **Leave at 0.** How many cut-off values the model tries per measurement; 0 = the standard 256, which is the most accurate. Lowering it trades accuracy for speed. |
+| **Enable SP Classify extension** | ✅ | Turns the extension off without uninstalling it. |
+| **XGBoost histogram bins** | 0 | Leave at 0. See below. |
+| **Use batch-corrected values** | ❌ | The same setting as **Use batch-corrected values in clustering + ML (streamed, no columns)** in the Batch Normalisation dialog. See §[19.4](batch-normalisation.md#194-how-its-applied). |
 
-**XGBoost histogram bins — leave this alone.**
-
-**The default is the most accurate setting. Changing it trades accuracy for speed, and SP Classify is built on the assumption that you would rather wait and get the better answer.** The rest of this section is here so you know what the setting is if you meet it — not as a suggestion to change it.
-
-*What it is.* The classifier works by asking yes/no questions about one measurement at a time — *"is this cell's CD8 above 412?"* To find a good cut-off it has to try candidates. Trying every value in your data would be exact but painfully slow, so instead it sorts your cells by that measurement, chops them into buckets, and only tries the cut-offs *between* buckets. This setting is how many buckets. The standard 256 gives a possible cut-off at roughly every 0.4% of your cells, which is fine enough that you are unlikely to lose a real boundary.
-
-*What lowering it does.* Fewer buckets means fewer cut-offs to test, so training is faster — 128 is about twice as fast, 64 about two and a half times. But it also means fewer places the model is allowed to cut. If two cell types are separated by a narrow intensity window on some marker and that window falls inside a single bucket, the model can no longer split them there.
-
-*If you genuinely need the speed* — a very large panel, a deadline — then treat it as an experiment rather than a switch: train once at the default and export the cell table, then again at 128, and compare both the Training Metrics and the two exported class columns. Some cells **will** be classified differently. Only you can judge whether they are cells that matter. The training log header records the value used (`XGB max_bin: …`), so runs stay comparable afterwards.
+**XGBoost histogram bins.** Leave this at 0 (= 256 bins, the most accurate setting). Lower values make XGBoost training faster (128 about 2×, 64 about 2.5×) but change some predictions. To try a lower value, train once at 0 and once at 128, export the cell table each time, and compare the Training Metrics and the class columns. The training log records the value used as `XGB max_bin`.
 
 ---

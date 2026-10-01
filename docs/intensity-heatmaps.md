@@ -2,27 +2,25 @@
 
 **Menu:** *Extensions → SP Classify → Intensity Heatmaps...*
 
-A phenotype × marker heatmap of **mean whole-cell intensity per predicted cell class** — the standard "mean marker expression per phenotype" view used to sanity-check that each class actually expresses the markers it should (e.g. CD8⁺ T-cells are high for CD8, Tregs high for FOXP3).
+Shows the mean whole-cell intensity of each marker for each cell class. Rows are classes and columns are markers (`<marker>: Cell: Mean` measurements). Use it to check that each class has high values for its expected markers, e.g. CD8 T cells high for CD8, Tregs high for FOXP3.
 
-Rows are cell classes (the `PathClass` assigned to each detection), columns are markers (every `"<marker>: Cell: Mean"` whole-cell measurement), and each cell is the mean intensity of that marker across all cells of that class.
-
-When you open the heatmap you first pick which whole-cell mean measurements to include:
+When the window opens, choose which whole-cell mean measurements to include:
 
 ![Select measurements for intensity heatmap](doc_images/select_measurements_for_intensity_heatmap.png)
 
-**Colour = z-score across phenotypes.** Each marker column is standardised across the class rows, so the colour highlights *which phenotype is relatively high (red) or low (blue)* for that marker, independent of the marker's absolute brightness. A diverging blue↔white↔red scale is used with a colorbar legend; grey means "no cells of that class had a valid value for that marker". The numeric mean can be overlaid in each cell via **Show mean values**.
+**Colour** shows each marker's z-score across classes: red means the class is higher than other classes for that marker, blue means lower. Colours compare classes within one marker, not brightness between markers. Grey means no cells of that class had a value for that marker. **Show mean values** (ticked by default) prints the mean in each square.
 
 ![Mean marker expression per phenotype heatmap](doc_images/marker_intensity_heatmap.png)
 
 **Image selector** (top of the window):
-- **The current image** (selected by default).
-- **Any other project image** — loads that image's saved data in the background and computes its heatmap on demand (results are cached after the first load).
-- **All Images (Project Combined)** — a project-wide heatmap computed from **true pooled means** (every cell across every image contributes equally), not an average of per-image averages.
+- **The open image** (selected by default).
+- **Any other project image**: its saved data is loaded and its heatmap calculated. While the window is open, the result is kept, so choosing the image again is immediate.
+- **All Images (Project Combined)**: one heatmap for the whole project. Each mean is calculated over all cells from all images, not as an average of the per-image means.
 
 **Buttons:**
-- **Export PNG** — saves the heatmap exactly as drawn (white background).
-- **Export CSV** — a `Class, CellCount, <marker>…` table of the underlying mean intensities (`NA` where a class had no valid value).
+- **Export as PNG…**: saves the heatmap as shown, on a white background.
+- **Export CSV…**: saves a `Class, CellCount, <marker>…` table of the mean intensities (`NA` where a class had no value).
 
-> The heatmap needs whole-cell mean intensity measurements (`"<marker>: Cell: Mean"`). If your detections don't have them, run QuPath cell detection / intensity measurement first. Classes come straight from the predictions in the viewer, so run a classifier (or apply gating) before opening the heatmap.
+> The heatmap needs `<marker>: Cell: Mean` measurements. If your cells do not have them, run *Analyze → Cell detection → Cell detection* in QuPath first. Classes are taken from the current cell classifications, so run a classifier or gating (§[11](scatter-clustering.md)) before opening the heatmap.
 
 ---

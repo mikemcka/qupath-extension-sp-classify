@@ -1,118 +1,88 @@
-# Image pixel prescreen (whole-image QC, no cells needed) - Experimental
+# Image pixel prescreen (whole-image QC, no cells needed)
+
+> **Experimental.**
 
 **Menu:** *Extensions → SP Classify → Image Pixel Prescreen...*
 
-A **prescreen you run at the very start of a project** — before any segmentation or
-classification exists. It reads a low-resolution version of every image straight
-off the pyramid and summarises each one by its raw pixel intensities, then ranks
-and flags images against the cohort. Use it to spot slides that are mostly
-background, over-exposed, weakly stained, or otherwise unusual, so you can fix or
-exclude them before investing in analysis. It is useful to identify images which will 
-need additional attention and labelling during cell classification. It is the pixel-level twin of the
-[Project Prediction Summary](prediction-summary.md) (which needs cells);
-this one needs none.
+Run this at the start of a project, before segmentation. It reads a low-resolution copy of every image, measures pixel intensities for each channel, and flags images that differ from the rest of the project: mostly background, saturated, weakly stained, or unusually bright or dim. Use it to decide which images to fix, exclude, or label more heavily later. It does not need cells. The [Project Prediction Summary](prediction-summary.md) does a similar check after classification.
 
 ![Image pixel prescreen](doc_images/pixel_prescreen.png)
 
 ### How it works
 
-1. For each project image, the extension reads the **nearest pyramid level whose long
-   edge is ≈ 2048 px** (requested downsample = `longEdge / 2048`). Reading every
-   image to the same pixel footprint keeps the cohort statistics comparable
-   like-for-like, regardless of each slide's native size or pyramid structure.
-   Images are **read in parallel** (a small fixed thread pool) so large projects
-   scan several-fold faster.
-2. Channels are **aligned across images by name**.
-3. Per-channel statistics are computed (below), including a per-channel **focus**
-   (Laplacian variance) sharpness proxy.
-4. The image-level summaries and each **signal-bearing** channel's brightness
-   (`p99`) are converted to **robust z-scores** (`0.6745 × (value − median) / MAD`)
-   **across the cohort** — the same robust machinery as §8.
-5. Deterministic threshold rules assign each image a **verdict**, a set of
-   **flags**, and a plain-English **review**.
+1. Each image is read at the pyramid level closest to 2048 px on its long edge, so every image is compared at the same size. Up to 4 images are read at once.
+2. Channels are matched across images by name.
+3. Statistics are calculated for each channel (table below), including a sharpness measure (**focus**).
+4. The image-level values, and the `p99` brightness of each channel that has signal, are converted to robust z-scores across the project: `0.6745 × (value − project median) / MAD`. This is the same method as §8.
+5. Fixed threshold rules give each image a **verdict**, zero or more **flags**, and a written **review**.
 
 ### What each statistic means
 
-Per channel, over all pixels of the low-resolution image (values sorted ascending
-where percentiles are involved):
+Per channel, over all pixels of the low-resolution image:
 
-| Statistic | Definition | What it tells you |
-|---|---|---|
-| **median** | 50th percentile | Robust brightness; the main sort/comparison value (mean's outlier-resistant cousin). |
-| **mean** | `Σx / N` | Brightness including the tails; sensitive to hot pixels by design. |
-| **std** | population standard deviation | Spread of intensities. |
-| **min / max** | extrema | `max` is shown but **not** used for flagging — one hot pixel moves it. |
-| **p1 / p99** | 1st / 99th percentiles | `p1` = noise floor, `p99` = true signal ceiling; both ignore single extreme pixels. |
-| **saturation fraction** | fraction of pixels ≥ `0.999 × dtypeMax` | Clipping / over-exposure. `n/a` for floating-point images (no fixed max). Uses the **storage bit depth** (e.g. 255 for 8-bit, 65535 for 16-bit). |
-| **Otsu threshold** | foreground/background split from the channel histogram | The cutoff used for the next two rows. |
-| **background fraction** | fraction below the Otsu threshold | How much of the channel is background. |
-| **foreground coverage** | `1 − background fraction` | How much real signal — the direct **"lots of background"** measure. |
-| **dynamic range** | `p99 − p1` | Flat / weak / empty channels score near zero. |
-| **Laplacian variance (focus)** | variance of the discrete Laplacian over the image | No-reference sharpness proxy (higher = sharper). Intensity-scale dependent, so best read within a cohort. |
+| Statistic | What it tells you |
+|---|---|
+| **median** | Middle pixel value. Used for sorting and comparison because single bright pixels do not change it. |
+| **mean** | Average pixel value. Single very bright pixels raise it. |
+| **std** | Standard deviation: the spread of pixel values. |
+| **min / max** | Lowest and highest pixel value. `max` is shown but not used for flags, because one bright pixel sets it. |
+| **p1 / p99** | 1st and 99th percentiles. `p1` is the background level and `p99` the signal level. Single extreme pixels do not change them. |
+| **saturation fraction** | Fraction of pixels at or above 99.9% of the highest value the file can store (255 for 8-bit, 65535 for 16-bit). Measures clipping (over-exposure). `n/a` for floating-point images. |
+| **Otsu threshold** | Automatic cut-off between background and foreground, calculated from the channel histogram. Used by the next two rows. |
+| **background fraction** | Fraction of pixels below the Otsu threshold. |
+| **foreground coverage** | 1 − background fraction: how much of the channel is signal. Low values mean a lot of background. |
+| **dynamic range** | `p99 − p1`. Close to zero for flat, weak or empty channels. |
+| **Laplacian variance (focus)** | Sharpness measure (higher = sharper). It also depends on brightness, so compare it only within a project. |
 
-Image-level (derived across channels):
+Image-level (calculated across channels):
 
-| Statistic | Definition | What it tells you |
-|---|---|---|
-| **empty fraction** | fraction of pixels below the Otsu threshold in **every** channel | The single best "this slide is mostly glass/background" indicator. |
-| **focus** | **max** per-channel Laplacian variance (the sharpest channel) | Sharpness proxy. **Surfaced for inspection only — never flagged**, because it tracks overall brightness as much as true focus (a dim-but-fine slide reads as low focus). The max ignores near-dead channels, which sit near zero. |
-| **intensity z** | largest **signal-bearing** channel `p99` (brightness) robust-z vs the cohort | Drives the **intensity-outlier** flag — surfaces slides whose brightness profile diverges from the cohort (a likely ML challenge). Only channels with real signal contribute, so near-empty markers can't trigger it. |
+| Statistic | What it tells you |
+|---|---|
+| **empty fraction** | Fraction of pixels below the Otsu threshold in **every** channel. The best measure of how much of the slide is glass or background. |
+| **focus** | The highest per-channel focus value (the sharpest channel). Shown only; it never flags an image, because it changes with brightness as well as sharpness. |
+| **intensity z** | The largest `p99` z-score among channels with signal. Sets the `INTENSITY_OUTLIER` flag. |
 
 ### Verdicts, flags, and the score
 
-Each image gets one **verdict** and zero or more **flags** (default thresholds, all
-z-scores robust/MAD-scaled):
+Each image gets one **verdict** and zero or more **flags**. Default thresholds (z = robust z-score):
 
-| Verdict / flag | Fires when |
+| Verdict / flag | Set when |
 |---|---|
 | `BACKGROUND_HEAVY` | mean foreground-coverage z ≤ −2.5, **or** empty-fraction z ≥ 2.5 |
-| `SATURATED` | max saturation fraction ≥ 1% **and** its z ≥ 3.0 (cohort-relative), **or** ≥ 5% in absolute terms (clipping that severe is a defect on its own) |
+| `SATURATED` | highest channel saturation fraction ≥ 1% **and** its z ≥ 3.0, **or** saturation fraction ≥ 5% whatever the other images show |
 | `WEAK_SIGNAL` | median dynamic-range z ≤ −2.5 |
-| `INTENSITY_OUTLIER` | a **signal-bearing** channel's `p99` (brightness) z magnitude ≥ 2.5 (bright **or** dim) |
+| `INTENSITY_OUTLIER` | the `p99` z of a channel with signal is ≥ 2.5 or ≤ −2.5 (brighter or dimmer than the project) |
 | `OK` | none of the above |
 
-> **Why signal-gated?** Intensity-outlier detection runs only on channels whose
-> cohort-median foreground coverage clears a small floor (~5%). Near-dead markers
-> (whose `p99` hovers at the noise floor) are excluded, so their meaningless
-> relative jitter can't manufacture false "outlier" flags. **Focus is computed and
-> shown but never flags** — see the image-level table above.
+> Only channels with a median foreground coverage of at least 5% across the project are checked for intensity outliers. Channels with almost no signal are skipped, so they cannot produce false flags. Focus is shown but never flags an image.
 
-The **Score** is the sum of the positive deviations that drive those flags — higher
-means more unusual versus the project baseline. The table is sorted by Score by
-default.
+The **Score** is the sum of the positive deviations behind the flags. A higher Score means the image is more unusual for the project. The table is sorted by Score by default.
 
-**Table columns:** Image, Verdict, Score, Foreground %, Empty %, Max sat %,
-Dyn. range, Focus, Intensity z, Flagged. **Filter:** *Flagged only*.
+**Table columns:** Image, Verdict, Score, Foreground %, Empty %, Max sat %, Dyn. range, Focus, Intensity z, Flagged. Tick **Flagged only** to hide unflagged images.
 
-**Review pane** (below the table) for the selected image gives the plain-English
-context, e.g.:
+The **review pane** below the table explains the result for the selected image, for example:
 
 > TRMhi_284_4 — Intensity outlier
 > • Ly6G_S8 - Cy5_AF brightness (p99) 1246.00 is brighter than the cohort (median 220.00, +11.2 MAD).
 > Suggested action: review / normalize — intensity differs from the cohort (may challenge ML).
 
-…followed by a per-channel breakdown (median | p99 | foreground% | dyn.range | sat% | focus).
+This is followed by a table for each channel (median | p99 | foreground% | dyn.range | sat% | focus).
 
-**Buttons:** *Open Selected Image* (jumps QuPath there without saving the current
-one), *Export CSV* (wide layout — image-level columns including `MaxFocus`,
-`MaxFocusZ`, `MaxIntensityZ`, `MaxIntensityChannel`, plus a block of per-channel
-columns — including `LaplacianVariance` — for every channel in the cohort), *Close*.
+**Buttons:**
+- **Open Selected Image** opens the image without saving the current one.
+- **Export CSV** writes one row per image: image-level columns (including `MaxFocus`, `MaxFocusZ`, `MaxIntensityZ`, `MaxIntensityChannel`), then a block of columns for each channel (including `LaplacianVariance`).
+- **Close**.
 
 ### How to read it
 
-- **Sort by Score** (default). Look at the top rows first.
-- **Background-heavy** → mostly glass/empty. Exclude, re-acquire, or crop to the tissue.
-- **Saturated** → a channel is clipped. Fix exposure or drop it from intensity-based analyses.
-- **Weak signal** → flat, low-contrast image. Staining or exposure problem.
-- **Intensity outlier** → a signal-bearing channel is far brighter/dimmer than its peers. The review pane names the channel. These slides diverge from the cohort and may **challenge ML** (consider per-slide normalisation, or extra review). Check the staining batch or acquisition settings.
-- **Focus** (column / per-channel) → a sharpness proxy you can **sort on** to spot blur, but it is not a verdict — low focus often just means a dim slide.
-- **OK** → pixel statistics are within the normal range for the project.
+- **Sort by Score** (the default) and check the top rows first.
+- **Background-heavy**: mostly glass or empty. Exclude the image, re-acquire it, or crop it to the tissue.
+- **Saturated**: a channel is clipped. Fix the exposure, or leave that channel out of intensity-based analyses.
+- **Weak signal**: a flat, low-contrast image. Check the staining or exposure.
+- **Intensity outlier**: a channel with signal is much brighter or dimmer than in the other images. The review pane names the channel. The classifier may find these images harder. Consider batch normalisation (§19) or extra labelling, and check the staining batch and acquisition settings.
+- **Focus** (column and per channel): sort on it to find blurred images. It is not a verdict; low focus often means only that the image is dim.
+- **OK**: pixel statistics are within the normal range for the project.
 
-> **Caveats.** Robust z is noisy on tiny projects (< ~5 images) — don't
-> overinterpret. Saturation uses the storage bit depth, so a 12-bit image stored
-> as 16-bit reports against 65535. Floating-point images report saturation as
-> `n/a`. One downsampled image (all channels) is held in memory at a time; for
-> very highly multiplexed panels this can be large — the 2048 px target is the
-> place to dial it down if needed.
+> **Caveats.** With fewer than about 5 images, the z-scores are unreliable. Saturation is measured against the storage bit depth, so a 12-bit image stored as 16-bit is compared with 65535. Floating-point images show saturation as `n/a`. Up to 4 images are read at once, each at about 2048 px on the long edge with all channels, so panels with many channels need more memory. This size cannot be changed in the dialog.
 
 ---

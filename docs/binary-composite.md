@@ -1,45 +1,41 @@
 # Binary + composite workflow in detail
 
-Use this when you want **per-marker** classifiers (one for CD3 positive/negative, another for CD8 positive/negative, etc.) and then combine them into composite cell types. Great for smaller panels or functional markers like Ki67.
+Use this to train one classifier per marker (e.g. one for CD3 positive/negative, another for CD8 positive/negative) and then combine their results into composite classes. Use it for panels with few markers, or for markers that describe cell state, such as Ki67.
 
 ### 6.1 Create a binary classifier
 
 **Menu:** *Extensions → SP Classify → Binary Classifiers...*
 
-- **Create...** → enter a marker name (e.g. `CD3`). Marker names are sanitised to safe filesystem characters.
-- The marker is registered in `<project>/celltune/binary-registry.json` and a state file `<project>/celltune/binary/CD3.json` is created when you first train.
-
-Select the marker in the list and click **Open**. The dialog closes; the main sidebar switches into **Binary Mode** with a blue banner: `Active binary mode: CD3`.
+1. Click **Create...** and enter a marker name (e.g. `CD3`). Characters other than letters, digits, `.`, `_` and `-` are replaced with `_`. The name cannot start with `.` or `-`.
+2. Select the marker in the list and click **Open**. The dialog closes and the sidebar switches to **Binary Mode**, with the banner `Active binary mode: CD3` in blue.
 
 In binary mode:
-- The class buttons in Manual Label Mode are restricted to `CD3_pos` and `CD3_neg` (so you can't accidentally label across markers).
-- **Pool labels from all images** is auto-enabled and locked — each marker classifier always trains on its full pooled label set.
-- Settings, sampling, review, and metrics work exactly the same as multi-class.
+- The Manual Label Mode class buttons are limited to `CD3_pos` and `CD3_neg`.
+- **Pool labels from all images** is ticked and cannot be changed.
+- Settings, sampling, review and metrics work as in multi-class mode.
 
-Train, review, and iterate until you're happy. Then click **Exit Binary Mode** to return to multi-class.
+Repeat train → review → retrain until the Training Metrics F1 stops improving and the predictions look correct on images you did not label. Then click **Exit Binary Mode** to return to multi-class mode.
 
-Repeat for every marker you want in the composite.
+Repeat for each marker you want in the composite.
 
 ### 6.2 Composite classification
 
 **Menu:** *Extensions → SP Classify → Composite Classification...*
 
-- **Markers** — checkbox per trained binary classifier. **All** / **None** buttons above. Only markers that have been trained (have a saved XGBoost model) appear.
-- **Images** — checkbox per project image. **All** / **None** / **Current only** buttons above.
-- **Prepend current primary classification (colour follows primary)** — see below.
-- **Apply** — runs the classifiers.
+- **Markers**: one checkbox per trained binary classifier, all ticked by default. Markers you have not trained are not listed. **All** / **None** tick or untick every marker.
+- **Images**: one checkbox per project image, all ticked by default. Buttons: **All** / **None** / **Current only**.
+- **Prepend current primary classification (colour follows primary)**: see below.
+- **Apply**: runs the classifiers.
 
-**How it works:**
-- The currently open image is classified **in-memory** — viewer updates immediately, no save/reload.
-- Every other selected image is read from disk, classified, and written back (logged in the panel's text area).
-- Each cell gets a composite `PathClass` named by joining the marker results alphabetically:
-  - `CD3+:CD8-:CD45+` etc.
-  - `+` if the binary classifier's positive probability ≥ 0.5, else `-`.
+**What Apply does:**
+- The open image updates in the viewer immediately. Other selected images are opened, classified and saved. Progress is shown in the dialog's log.
+- Each cell gets a class made of the marker names in text sort order, each followed by `+` or `-`, e.g. `CD3+:CD45+:CD8-`. In text sort order `CD45` comes before `CD8`.
+- A marker is `+` when its binary classifier gives a positive probability of 0.5 or higher, and `-` otherwise.
 
-**Prepend current primary classification:**
-- When **off** (default): composite name is markers only (`CD3+:CD8-`), QuPath auto-assigns the class colour.
-- When **on**: each cell's current primary `PathClass` is captured **before** any reassignment and prepended (`Tumour:CD3+:CD8-`). The composite class's colour is set to the primary class's colour, so the viewer keeps your existing multi-class colouring. Cells with no current primary fall back to binary-only naming.
+**Prepend current primary classification** (off by default):
+- Unticked: the class name has the marker results only (`CD3+:CD8-`). QuPath assigns the colour.
+- Ticked: each cell's existing class is added to the front (`Tumour:CD3+:CD8-`), and the cell keeps the colour of its existing class. Cells with no class get the marker-only name.
 
-> Use the merge mode after you've already run a multi-class classifier — the multi-class result becomes the cell-type "backbone" and the binary classifiers add functional state.
+> Tick **Prepend current primary classification** after running a multi-class classifier, so each cell keeps its cell type and gains the marker results.
 
 ---

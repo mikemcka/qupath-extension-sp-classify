@@ -125,7 +125,8 @@ public class FeatureImportanceView {
         topRow.setPadding(new Insets(8, 10, 4, 10));
 
         // ── Subtitle ────────────────────────────────────────────────────────
-        Label subtitle = new Label("Top features by mean |SHAP| value  ·  averaged across active models");
+        Label subtitle = new Label(
+                "Top features by mean |SHAP| value  ·  from XGBoost and Random Forest models (LightGBM not included)");
         subtitle.setStyle("-fx-font-size: 10px; -fx-text-fill: #666;");
         HBox subtitleRow = new HBox(subtitle);
         subtitleRow.setPadding(new Insets(0, 10, 6, 10));

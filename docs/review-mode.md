@@ -2,50 +2,58 @@
 
 **Button:** **Enter Review Mode** in the sidebar.
 
-Review mode samples the **disagreement** cells (where Model 1 ≠ Model 2) using a 5-tier strategy so you don't waste labelling effort on cells that are easy or already represented. The tiers run in order and each **claims** the cells it selects, so a later tier can never re-pick a cell an earlier one already took (no double-counting):
+Review mode shows you, one at a time, cells where Model 1 and Model 2 predict different classes (disagreement cells), so you can label them.
 
-| Tier | Goal | Default budget @ 256 cells |
+Click **Enter Review Mode**. A **Sampling Settings** dialog asks how many disagreement cells to review (default 200; the number available is shown). Cells you have already reviewed are not sampled again.
+
+Cells are picked in five tiers, in order. A cell picked in one tier is not picked again in a later tier.
+
+| Tier | Picks | Budget per 256 cells |
 |---|---|---|
-| **0 — FOV balance** | Stop one slide dominating | ~84 cells, prioritising FOVs with high disagreement rate |
-| **1 — Cell-type disagreement** | Cover the most confused classes | ~16 per class |
-| **2 — Rare cell types** | Don't ignore small populations | ~10 per rare type |
-| **3 — Preferred confusions** | User-specified pair (e.g. `CD4:CD8`) | ~8 per pair |
-| **4 — Random fill** | Use any remaining budget | up to 256 |
+| **0 — FOV balance** | cells from the images with the highest disagreement rate | 84 in total, up to 14 per image |
+| **1 — Cell-type disagreement** | cells from the classes with the highest disagreement rate | 112 in total, up to 16 per class |
+| **2 — Rare cell types** | cells from the classes with the fewest predicted cells | 60 in total, up to 10 per class |
+| **3 — Preferred confusions** | cells from chosen class pairs (e.g. `CD4:CD8`) | 40 in total, up to 8 per pair |
+| **4 — Random fill** | random disagreement cells, to fill the rest of the batch | the remainder |
 
-> The budgets above are calibrated for the default 256-cell batch. If you request a different sample size, every tier budget scales linearly (`× sampleSize / 256`, floored at 1 per tier), so the tier mix stays proportional — a smaller batch isn't just the first tier truncated.
+> Budgets scale with the number you enter: each is multiplied by (your number ÷ 256) and rounded, with a minimum of 1. There is no control for choosing class pairs, so tier 3 is always skipped.
 
-The cell currently under review is ringed in magenta in the viewer, with the toolbar showing each model's top prediction:
+The cell under review has a magenta ring in the viewer. The toolbar shows each model's prediction:
 
 ![Review mode — highlighted cell](doc_images/review_mode_highlighted_cell.png)
 
-You can Ctrl/Cmd-click several cells at once to label a group together; the toolbar header shows `→ clicked cell` for the active selection:
+To label a cell that is not in the queue, click it in the viewer. Ctrl-click (Cmd-click on macOS) to select several cells and label them together. The toolbar then shows `→ clicked cell` after the queue position, and the buttons label the clicked cells:
 
 ![Review mode — multiple clicked cells](doc_images/review_mode_clicked_multiple_cells.png)
 
 **Toolbar buttons during review:**
-- **Previous / Next / Skip** — navigate the queue.
-- **XGB: ClassName (89%)** — accept Model 1's top prediction; blue background.
-- **LGB: ClassName (76%)** — accept Model 2's top prediction; pink background.
-- **Both: ClassName (XX%)** — single combined button if M1 and M2 agree.
-- **Avg: ClassName (XX%)** — appears only when the two models' **averaged** probability points to a class that is neither model's own top pick; accepts that averaged prediction.
-- **All Classes ▼** — pick a different class if both models are wrong.
-- **Done** — exit; labels are merged back into the label store and saved per-image to `<project>/celltune/image-labels/`.
+- **Previous** / **Next** / **Skip**: move through the queue.
+- **XGB: CD8 (87%)** (blue): accept Model 1's prediction.
+- **LGB: CD4 (65%)** (pink): accept Model 2's prediction. The two buttons are labelled XGB and LGB even if you chose Random Forest for either model.
+- **Both: CD8 (90%)**: shown instead of the two buttons when the models agree. The percentage is the mean of the two models' confidence.
+- **Avg: Treg** (green, no percentage): shown only when averaging the two models' probabilities gives a class that neither model chose. Click it to accept that class.
+- **All Classes ▼**: choose any other class.
+- **Done**: close review and save your labels.
 
-The toolbar header also shows the **name(s) of the annotation region(s)** the current cell falls inside, in bold dark blue (e.g. `◆ Tumour, Stroma`), so you keep the spatial context without leaving review.
+The toolbar header also shows the names of any annotations containing the current cell, e.g. `◆ Tumour, Stroma`.
 
-Switching to a **different image** while a classifier is trained **auto-applies** its predictions to that image first, so you can review it immediately without a separate predict step.
+When you open a different image, its saved predictions are loaded. If it has none, the trained classifier is applied to it when you enter review mode, so you do not need a separate prediction step.
 
-If you have set up a channel mapping (§[4.4](setup.md#44-channel-mapping-for-review-marker-table)), tick **Auto-select channels during review** and the viewer will display only the channels mapped to whatever class the current cell was predicted as. The separate **Auto-adjust brightness/contrast of shown channels** box (off by default) additionally auto-sets each shown channel's display range per cell; leave it unticked to keep your own brightness/contrast. Both checkboxes remember their state across review windows and QuPath restarts.
+**Channel display.** If you have set up a channel mapping (§[4.4](setup.md#44-channel-mapping-for-review-marker-table)):
+- Tick **Auto-select channels during review** to show only the channels mapped to the current cell's predicted class.
+- Tick **Auto-adjust brightness/contrast of shown channels** (off by default) to also set each shown channel's display range for each cell. Leave it unticked to keep your own brightness/contrast settings.
 
-Beneath the checkboxes, an **Edit channel mapping…** button opens the [Channel Mapping editor](marker-table.md) (non-modal, so you can keep reviewing), and a **status line** says what the current cell is showing:
+Both checkboxes keep their setting after you close review mode or restart QuPath.
 
-- `CD8T → CD8, CD3` — the channels now displayed for the cell's class.
-- `No channels mapped for "X"` — that class has no mapping; the display is left alone.
-- `No channel in this image matches "X"'s mapping — display unchanged` (red) — the mapping names channels this image doesn't have.
-- `No channel mapping set — use Edit channel mapping…` — nothing is set up yet.
+**Edit channel mapping…** (below the checkboxes) opens the [Channel Mapping editor](marker-table.md). You can keep reviewing while it is open. When you save in the editor, the current cell's channels update immediately.
 
-Saving in the editor during review re-applies the channels to the current cell immediately.
+The status line below it shows what is displayed for the current cell:
 
-After review, click **Train** again — the new labels feed into the next cycle.
+- `CD8T → CD8, CD3`: the channels shown for the cell's class.
+- `No channels mapped for "X"`: the class has no mapping. The display is not changed.
+- `No channel in this image matches "X"'s mapping — display unchanged` (red): the mapping lists channels this image does not have.
+- `No channel mapping set — use Edit channel mapping… to choose channels per class.`: no mapping has been set up.
+
+After review, click **Train** again to train with the new labels.
 
 ---

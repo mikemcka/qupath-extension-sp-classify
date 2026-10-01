@@ -2,34 +2,33 @@
 
 **Menu:** *Extensions → SP Classify → Generate Distance Measurements...*
 
-A project-wide batch tool that adds spatial distance columns to your cell measurements — useful for downstream neighbourhood / spatial-statistics analysis. It runs across as many project images as you select, loading and saving each one for you.
+Adds distance measurements to each cell, for spatial analysis. It runs on the project images you select, and opens and saves each one for you.
 
-It can generate three independent measurement families (tick any combination):
+There are three types of measurement. All three are ticked by default.
 
-| Computation | What it writes per cell | Backed by |
-|---|---|---|
-| **Detection-to-annotation signed distances** | `Signed distance to annotation <class> <unit>` — negative inside the annotation, positive outside. | QuPath `DistanceTools.detectionToAnnotationDistancesSigned` |
-| **Cross-class centroid distances** | `Distance to detection <class> <unit>` — nearest centroid-to-centroid distance to a cell of every *other* class. | QuPath `DistanceTools.detectionCentroidDistances` |
-| **Same-class nearest-neighbour distances (excludes self)** | `Distance to other <class> <unit>` — distance to the nearest *other* cell of the **same** class. | The extension (spatially indexed; see below) |
+| Computation | What it writes per cell |
+|---|---|
+| **Detection-to-annotation signed distances** | `Signed distance to annotation <class> <unit>`: negative inside the annotation, positive outside. |
+| **Cross-class centroid distances** | `Distance to detection <class> <unit>`: distance from the cell's centre to the centre of the nearest cell of each other class. |
+| **Same-class nearest-neighbour distances (excludes self)** | `Distance to other <class> <unit>`: distance to the nearest other cell of the same class. |
 
-`<unit>` is `µm` when a pixel size is available (from calibration or the override below), otherwise `px`.
+`<unit>` is `µm` when a pixel size is available (from the image calibration or the **Pixel size:** field), otherwise `px`.
 
 ### Dialog options
 
-- **Images** — checklist of every project image, with **All** / **None** / **Current only** buttons. All are ticked by default.
-- **Pixel size (µm/pixel)** — optional. Pre-filled from the current image's calibration when available.
-  - Leave **blank** to use each image's own existing calibration.
-  - Enter a value to override calibration for *every* selected image so results come out in microns.
-  - **Persist this pixel size to each image's calibration on save** — when ticked, the override is written into each image's calibration metadata (so future measurements also use this scale). When unticked, the override is reverted after the run.
-- **Skip images where all selected measurements already exist** (default on) — before computing, the extension scans every cell. If all cells already carry every measurement the selected computations would produce, the image is skipped entirely (no recompute, no re-save). This makes interrupted runs cheap to resume. It is **all-or-nothing per image**: if even one selected measurement is missing, the whole image is recomputed, guaranteeing internally consistent results. Untick to force recomputation (e.g. after changing classes).
-- **Parallel image workers** (1–N cores) — how many images are processed at the same time.
-  - The heavy distance maths for a *single* image already spreads across all CPU cores, so raising this mostly overlaps disk load/save (I/O) with compute.
-  - **Many small images:** higher worker counts can speed up the batch.
-  - **A few very large images (hundreds of thousands of cells):** 1–2 workers is often fastest — each image then gets the full CPU and uses less memory.
+- **Images**: one checkbox per project image, all ticked by default. Buttons: **All** / **None** / **Current only**.
+- **Pixel size:** (µm/pixel), optional. Filled in from the open image's calibration when it has one.
+  - Leave it empty to use each image's own calibration.
+  - Enter a value to use it for every selected image, so results are in µm.
+  - **Persist this pixel size to each image's calibration on save** (off by default): saves the pixel size into each image's calibration, so later measurements also use it. When unticked, each image's original calibration is restored after the run.
+- **Skip images where all selected measurements already exist** (on by default): skips an image only if every cell already has every selected measurement. If any measurement is missing, the whole image is recalculated. Use this to resume an interrupted run. Untick it to recalculate everything, e.g. after changing classes.
+- **Parallel image workers:** how many images are processed at the same time. The range is 1 to the number of processors. The default is half the number of processors, up to 4. The calculation for each image already uses all processors, so more workers mainly let images load and save while others are calculated.
+  - Many images of about 10,000–20,000 cells: use more workers.
+  - Images of 500,000 cells or more: use 1–2 workers. This also uses less memory.
 
 ### Running it
 
-Click **Apply**. The log area streams per-image progress, e.g.:
+Click **Apply**. The log shows the progress of each image, e.g.:
 
 ```
 Starting on 41 image(s)…
@@ -41,8 +40,6 @@ Using 1 parallel image worker(s) (cores=14).
 [slide2.ome.tif] Saved.
 ```
 
-Classes with only a single cell are reported as `Skipping '<class>' (n=1)` for the same-class computation (a lone cell has no same-class neighbour). Each processed image is saved back to the project automatically. **Close** dismisses the dialog.
-
-> **Performance note.** For large numbers of small images (10-20K cells) use a higher number of workers, for large images (500k+ cells) use one or 2 workers.
+Classes with only one cell are skipped for the same-class measurement and logged as `Skipping '<class>' (n=1)`. Each processed image is saved to the project automatically. **Close** closes the dialog.
 
 ---

@@ -1,17 +1,16 @@
 # User Guide
 
-A human-in-the-loop cell classifier for QuPath 0.7. The extension trains two ML models in parallel (XGBoost + LightGBM by default) and uses their **disagreement** to surface the cells that need your attention. Everything runs in-process.
+A cell classifier for QuPath 0.7 that learns from cells you label. It trains two models on the same labels (XGBoost and LightGBM by default) and lists the cells where the two models predict different classes, so you can check and correct those cells first. It runs inside QuPath and does not need Python.
 
-Please note that function speed is dependent on hardware and size of project during analysis. Windows and tasks may take a moment to appear or start running especially with larger projects and images, **please be patient**.
+On large projects or images, windows and tasks can take several seconds to open or start. Wait before clicking again.
 
-Windows and boxes can be expanded or contracted by clicking and dragging corners which will display buttons correctly. You will see an arrow appear if you are mousing over the correct spot on the window.
+If a window opens with buttons cut off, drag its corner to make it larger. The cursor changes to a resize arrow over the corner.
 
 > **Conventions in this guide**
 > - **Bold** = exact UI label.
 > - `Monospace` = file path or code.
 > - "Multi-class mode" = the standard sidebar (any number of cell-type classes).
 > - "Binary mode" = a per-marker positive/negative classifier (CD4+/CD4−, etc.).
-> - Add your own screenshots next to each section heading after install.
 
 ---
 
@@ -34,7 +33,7 @@ Windows and boxes can be expanded or contracted by clicking and dragging corners
 11. [Cell scatter plot — clustering & gating](#11-cell-scatter-plot--clustering--gating)
     - [11.1 Controls](#111-controls)
     - [11.2 Selecting cells](#112-selecting-cells)
-    - [11.3 Apply Clusters — assign classes to clusters](#113-apply-clusters--assign-classes-to-clusters)
+    - [11.3 Apply Clusters — assign classes to clusters](#113-apply-clusters--assign-clusters--assign-classes-to-clusters)
     - [11.4 Cluster-within-clusters (hierarchical gating)](#114-cluster-within-clusters-hierarchical-gating)
     - [11.5 Project-wide clustering across images](#115-project-wide-clustering-across-images)
     - [11.6 Clustering method: k-means vs Leiden](#116-clustering-method-k-means-vs-leiden)
@@ -75,11 +74,14 @@ Windows and boxes can be expanded or contracted by clicking and dragging corners
 ## 1. Install & launch
 
 1. **Download** `qupath-extension-sp-classify-0.3.1-all.jar` from the [Releases page](https://github.com/mikemcka/qupath-extension-sp-classify/releases), or build it from source — see [CLAUDE.md](CLAUDE.md#build--test).
-2. Drop the JAR into QuPath's `extensions/` folder, or drag-and-drop it onto the running QuPath window.
-3. Restart QuPath. The **SP Classify** panel docks into the analysis tab pane on the right, you can mouse over the area and scroll the mouse wheel to uncover it.
-4. Some commands also live under the **Extensions → SP Classify** menu.
+2. Delete any older `qupath-extension-sp-classify-*-all.jar` from QuPath's extensions folder. If an old copy stays there, QuPath may load it instead of the new one. Then copy the new JAR into the folder, or drag it onto the QuPath window:
+   - Windows: `C:\Users\<you>\QuPath\v0.7\extensions\`
+   - Linux: `~/.local/share/QuPath/v0.7/extensions/`
+   - macOS: `~/Library/Application Support/QuPath/v0.7/extensions/`
+3. Restart QuPath. **SP Classify** is added as a tab in the analysis pane (the panel with the Project, Image and Annotations tabs). If the tab is not visible, hold the mouse over the row of tab names and scroll the mouse wheel until **SP Classify** appears.
+4. Other commands are in the **Extensions → SP Classify** menu.
 
-Disable the extension at any time from **Edit → Preferences → SP Classify → Enable**.
+To turn the extension off, go to **Edit → Preferences → SP Classify** and untick **Enable SP Classify extension**.
 
 ![Docked side panel](doc_images/docked_side_panel.png)
 
@@ -96,11 +98,13 @@ Select Features  →  Clustering Normalisation  →  Create classes (Class Contr
        ↓
 Channel Mapping (optional, for auto channel switching)
        ↓
-Manual Label Mode  → label ~20–50 cells across the open image
+Manual Label Mode  → label at least 20–30 cells per class
+                     (training needs at least 10 labelled cells in total)
        ↓
 Apply to which images... → choose images to predict on
        ↓
-Set Images at once, pick settings (Pool labels, Balancing, Early stopping, etc.)
+Set training options: Pool labels from all images, Enable data balancing,
+Early stopping, Images at once (images predicted in parallel; default 1, max 8)
        ↓
 Train  →  inspect Training Metrics + Confusion Matrix
        ↓
@@ -113,7 +117,7 @@ Project Prediction Summary  →  flag outlier slides → re-label as needed
 Export Cell Table  or  Export Ground Truth
 ```
 
-Detail per step is in §[4](#4-setup-steps-shared-by-both-workflows), §[5](#5-multi-class-workflow-in-detail), §[7](#7-after-training--review-mode).
+Each step is described in §[4](#4-setup-steps-shared-by-both-workflows), §[5](#5-multi-class-workflow-in-detail) and §[7](#7-after-training--review-mode).
 
 ---
 
@@ -124,7 +128,8 @@ Build one **positive/negative classifier per marker** (CD3, CD4, CD8, CD20…), 
 ```
 Select Features  →  Clustering Normalisation
        ↓
-Binary Classifiers... → Create "CD3" → Open (enters Binary Mode)
+Extensions → SP Classify → Binary Classifiers... → Create... (name it CD3)
+→ Open (enters Binary Mode)
        ↓
 Manual Label Mode → label CD3-positive vs CD3-negative cells
        ↓
@@ -134,15 +139,16 @@ Exit Binary Mode → repeat for CD4, CD8, CD20, etc.
        ↓
 Composite Classification... → tick markers, tick images
        ↓
-(optional) tick "Prepend current primary classification" to keep
-multiclass colouring
+(optional) tick "Prepend current primary classification (colour follows
+primary)" so each cell keeps its multi-class class name and colour in
+front of the marker labels
        ↓
 Apply → composite labels appear in viewer (Tumour:CD3+:CD8-, …)
        ↓
 Export Cell Table
 ```
 
-Detail per step is in §[6](#6-binary--composite-workflow-in-detail).
+Each step is described in §[6](#6-binary--composite-workflow-in-detail).
 
 ---
 
@@ -152,124 +158,107 @@ Detail per step is in §[6](#6-binary--composite-workflow-in-detail).
 
 **Menu:** *Extensions → SP Classify → Select Features...*
 
-QuPath cell-detection panels (COMET, MIBI, IMC, CODEX) often produce 1000–2000 measurement columns per cell. The extension lets you pick a subset for training; the rest are ignored.
+QuPath cell-detection panels (COMET, MIBI, IMC, CODEX) often produce 1000–2000 measurement columns per cell. Pick the subset to use for training. Unticked features are not used.
 
-- **Search** box — case-insensitive substring filter (matching groups auto-expand).
-- **Grouped checkbox tree** — features are bucketed into collapsible groups (below); tick a group's parent box to select/clear every feature in it at once.
-- **Select All** / **Clear All** — operate on whatever's currently visible after filtering. Great for removing large groups of features.
+- **Filter:** box — case-insensitive text search. Groups that contain a match open automatically.
+- **Grouped checkbox tree** — features are listed in collapsible groups (below). Tick a group's box to tick or untick every feature in it.
+- **Select All** / **Clear All** — tick or untick every feature currently shown by the filter.
 - **Expand All** / **Collapse All** — open or close every group.
-- Checkbox per row to toggle individual features.
-- Counter at the bottom: `X / Y selected`.
+- Tick or untick a row to change one feature.
+- The counter at the bottom shows `X / Y selected`.
 
-Features are grouped so large panels stay navigable — one group per **marker** (the text before the first `: `, e.g. `DAPI_AF`), then catch-all groups in this order:
+There is one group per **marker** (the text before the first `: `, e.g. `DAPI_AF`), followed by these groups:
 
 - **Morphology / Shape** — compartment-only measurements (`Cell: Area µm^2`, `Nucleus: Circularity`, …).
-- **Neighbors** — neighbour-aggregate features (`Neighbors: Mean: …`); labels keep the `Neighbors:` prefix so the context isn't lost.
-- **Embeddings** — dimensionality-reduction / embedding columns: UMAP, PCA, t-SNE, and `*_emb_*`-style names (e.g. `kronos_emb_0`).
-- **Other / Uncategorized** — anything matching none of the above, so nothing is silently misfiled into Morphology.
+- **Neighbors** — neighbour-aggregate features (`Neighbors: Mean: …`). Labels keep the `Neighbors:` prefix.
+- **Embeddings** — dimensionality-reduction and embedding columns: UMAP, PCA, t-SNE, and `*_emb_*` names (e.g. `kronos_emb_0`).
+- **Other / Uncategorized** — features that fit none of the groups above.
 
 ![Feature selection](doc_images/feature_selection.png)
 
-**Do you need to hand-prune for big panels?** Usually not. Both default models are gradient-boosted trees, which are robust to correlated and redundant features: at each split a tree picks the single most informative feature, so two near-duplicate columns don't distort the model the way they would in a linear/regression model — the worst case is wasted training time and *diluted* importance (a marker's signal gets split across its correlated columns, muddying SHAP plots). So extra features rarely hurt accuracy, but they do cost speed and interpretability.
+**Do you need to remove features by hand?** Usually not. Extra or near-duplicate features rarely lower accuracy with the default models, but they make training slower and split a marker's importance across several columns in the feature-importance plot. Leave **Auto-prune features** ticked to remove them automatically.
 
-Rather than manually paring the list down, leave **Auto-prune features** (§[14](#14-reference-every-setting-in-the-sidebar)) ticked — it removes the redundancy for you, non-destructively, at the start of every training round. Pruning runs on the **pooled, normalised training matrix**: your labelled cells *plus* the cells pooled from every other project image, after normalisation — so a feature is judged on the whole training cohort, not the open image alone. (Imported CSV rows are normalised and trained on, but are **excluded** from the prune decision, since their panel may be partial.) The stages are:
+**Auto-prune features (drop near-constant & redundant)** is ticked by default (§[14](#14-reference-every-setting-in-the-sidebar)). At the start of each training run it removes features from that run's feature list. It does not delete or change measurements. The decision uses raw values from your labelled cells on the open image, plus labelled cells from other images when **Pool labels from all images** is ticked. Rows imported from CSV are trained on but not used for the decision. Pruning is skipped if there are fewer than 10 labelled cells. It works in four steps:
 
-1. **Sparsity / variance filter** — drops features that are effectively constant across the pooled set (non-zero in fewer than ~5 cells, or zero variance). A feature that never varies can't help a tree split.
-2. **Within-marker correlation removal** — features are grouped (see *What defines a group* below); within each group it keeps the **highest-variance** feature and drops any peer whose absolute Pearson correlation with a kept feature exceeds ~0.95. This is what collapses `CD3: Cell: Mean` / `CD3: Cell: Median` / `CD3: Cell: Max` down to one representative column.
-3. **Cross-marker correlation removal** — available but **off by default**, so distinct markers are never merged just because they happen to co-vary.
-4. **Per-group whitelist (top 5)** — the **5 highest-variance features in every group are always kept**, immune to the stages above. A group with 5 or fewer features keeps *all* of them. So the classifier never goes blind to a marker, and each marker retains its strongest few features even when they correlate.
+1. **Constant features** — removes a feature that is non-zero in fewer than 5 cells or has zero variance.
+2. **Duplicates within a marker** — within each marker group, keeps the feature with the highest variance and removes any feature whose absolute Pearson correlation with a kept feature is above 0.95. For example, `CD3: Cell: Mean`, `CD3: Cell: Median` and `CD3: Cell: Max` become one column.
+3. **Duplicates across markers** — not removed. Features from two different markers are never merged, even when they are correlated.
+4. **Minimum kept per marker** — the 5 highest-variance features in each group are always kept, so every marker keeps at least 5 features (or all of them if it has 5 or fewer).
 
-> **What defines a "group" for pruning?** The group key is the text before the first `: ` (so `CD3: Cell: Mean` → `cd3`); if the name has no `: `, it's the token before the first underscore or space (so `kronos_emb_0` → `kronos`, `Distance to tumor` → `distance`). Matching is **case-insensitive** (`CD3` and `cd3` are one group). This pruning grouping is deliberately *separate* from the feature-picker categories above (Morphology / Neighbors / Embeddings) — those exist to navigate the UI; this one defines redundancy families for pruning.
+> **Marker groups for pruning:** a feature's group is the text before the first `: ` (`CD3: Cell: Mean` → CD3). If there is no `: `, the group is the text before the first underscore or space (`kronos_emb_0` → kronos, `Distance to tumor` → distance). Case is ignored. These groups are not the same as the Morphology / Neighbors / Embeddings groups in the feature picker.
 
-Pruning takes milliseconds and **never touches the measurements on disk** — it only trims the training column list for that run. The net effect is the same "near-identical accuracy, much faster training, cleaner SHAP plots" you'd get from hand-restricting to `Cell: Mean` only, without you having to guess which columns to keep.
-
-Your selection is saved in `<project>/celltune/classifier-state.json` and persists across QuPath sessions.
+Your selection is saved in `<project>/celltune/classifier-state.json` and is kept between QuPath sessions.
 
 ### 4.2 Clustering normalisation
 
 **Menu:** *Extensions → SP Classify → Clustering Normalisation*
 
-Per-feature transforms for the **clustering / scatter-plot / gating** workflows. **The classifier always trains and predicts on raw values** — normalisation configured here does not touch the phenotyping model (tree models are invariant to it anyway). Same prefix/search/select-all UI as Select Features, plus:
+These transforms are used only by clustering, the scatter plot and gating (§[11](#11-cell-scatter-plot--clustering--gating)). The classifier always uses raw values. The window has a **Filter:** search box, a prefix dropdown with **Select Prefix** / **Clear Prefix**, **Select All** / **Clear All**, and:
 
-- **Transform** dropdown:
-  - **arcsinh** — `arcsinh(x / cofactor)`. Recommended default.
-    - **Fluorescence (COMET, CODEX, IF)** — scale-dependent, so there is no single right number. For **raw 16-bit-style panels** (values in the hundreds–thousands, e.g. a raw COMET panel) a cofactor in the **tens (~25–50)** fits well; ~1 suits only already-normalised / low-range intensities, and a large value (e.g. 150) leaves the dim markers essentially untransformed.
-    - **MIBI mass spectrometry** — **cofactor = 0.05**, the community-standard value from Hartmann et al. (2021) / the squidpy MIBI-TOF tutorial, applied to per-cell mean intensities (see [References](README.md#references)).
-    - **The ideal cofactor tracks your data's intensity scale** — pick it near the background/signal boundary. Quick check: if almost every cell's raw value is *below* the cofactor, nearly all cells sit in the near-linear part of arcsinh and the transform is ≈ a no-op (e.g. cofactor 1 on MIBI means that mostly fall below 1, or 150 on dim fluorescence markers). If almost every value is *far above* it, everything is log-compressed and the low-end detail is lost. Aim for the value where the background collapses but the positive population stays resolved, and eyeball the transformed histogram to confirm.
-  - **sqrt** — `sqrt(max(0, x))`. Simple variance stabilisation, no cofactor.
+- **Transform:** dropdown:
+  - **arcsinh** — `arcsinh(x / cofactor)`. Recommended. Set **Cofactor:** (default 1.0) for your data, or click **Suggest…** to open a tool that estimates a cofactor from the background level of features you choose.
+    - Raw fluorescence (COMET, CODEX, IF; values in the hundreds to thousands): 25–50.
+    - MIBI: 0.05 (Hartmann et al. 2021; see [References](README.md#references)).
+    - Choose a value near the boundary between background and positive signal. If almost all raw values are below the cofactor, the transform changes very little. If almost all are far above it, low-intensity differences are lost.
+  - **sqrt** — `sqrt(max(0, x))`. No cofactor.
 
 ![Clustering normalisation](doc_images/normalise_features.png)
 
-You pick **which** features to transform and **one** transform/cofactor applied to all of them. Untouched features stay raw.
+The one transform and cofactor apply to every ticked feature. Unticked features stay raw. Do not tick morphology features (e.g. Cell Area) or features that are already normalised (e.g. foundation-model embeddings).
 
-**Do not** normalise morphological features like Cell Area or any pre-normalised features like foundation model embeddings.
+**Why use it.** Clustering compares cells by distance across all markers. Without a transform, a few very bright markers decide most of the result. arcsinh reduces the effect of bright outliers and keeps differences between dim cells.
 
-**What it's for — scale-dependent methods (clustering), not the classifier.** `arcsinh(x / cofactor)` is a monotone, per-feature squash: near-linear below the cofactor, log-compressed above it, so it flattens bright outliers while preserving the dim/low-intensity detail. Its job is to stop a few high-dynamic-range markers from dominating **Euclidean distance / kNN** in the workflows that measure distances between cells — the **scatter-plot clustering** (k-means and Leiden, §[11](#11-cell-scatter-plot--clustering--gating)), the PCA embedding, gating thresholds, and the colour-by-marker views. There it is essential: raw 16-bit intensities left untransformed make clustering track whichever markers happen to be brightest instead of the whole phenotype.
+**What it does not do.** It does not change the classifier, auto-prune, feature importance or ground-truth export, which all use raw values. It does not correct differences in staining or exposure between slides, because the same transform is applied to every image. For that, use batch normalisation (§[19](#19-batch-normalisation-uniform)) and label cells on several different slides.
 
-Two things it does **not** do:
+**What clustering does automatically.** The transform in this window is optional. Every clustering run also:
 
-- **It never touches the classifier.** The phenotyping model always trains and predicts on **raw** values — normalisation is applied only in the clustering path. (Even if it were applied, XGBoost / LightGBM / Random Forest split on rank order and arcsinh is a strictly increasing rescale, so predictions would be unchanged at any cofactor.) Auto-prune, feature-importance/SHAP, and ground-truth export all operate on the same raw values the model sees; export no longer writes `__norm` columns.
-- **It does not correct slide-to-slide (batch) differences, so it does not improve generalisation to unseen slides.** The same global transform is applied identically to every image, so it uses no per-image information and cannot remove per-slide staining/exposure offsets. Generalising across variable samples is a **batch-correction** problem (per-image or reference-based alignment) plus annotating a **diversity** of slides — not something arcsinh addresses. SP Classify provides per-image batch correction via UniFORM: see §[19](#19-batch-normalisation-uniform).
-
-**What this pane configures vs. what clustering always does.** The arcsinh/sqrt transform here is only **stage 1** of the clustering normalisation, and it is **optional** — leave it off and clustering still runs. The full pipeline every clustering fit applies is:
+1. z-scores each marker (subtracts the mean and divides by the standard deviation), and
+2. applies PCA when more than 50 markers are selected and **Reduce dims (PCA)** in the scatter plot is ticked (default: ticked).
 
 ```
-(optional arcsinh / sqrt)  →  z-score per marker  [always]  →  (PCA if >50 markers)  →  k-means / Leiden
-     stage 1 — this pane            stage 2 — automatic            dim-reduction — automatic
+(optional arcsinh / sqrt)  →  z-score each marker  →  (PCA if > 50 markers)  →  k-means / Leiden
 ```
 
-- **Stage 2 — z-score is mandatory and automatic.** Every clustering fit standardises each marker (subtract mean, divide by SD) over the active/pooled cells at fit time. This is what actually puts markers on a comparable scale so no single one dominates Euclidean distance — it happens **whether or not** you configure a transform here.
-- **Dimensionality reduction is automatic and conditional.** When more than ~50 marker columns are active (and the *Reduce dims (PCA)* option is on, the default), an exact PCA is applied after z-scoring, mirroring the scanpy `scale → PCA → neighbours → Leiden` recipe. Below that threshold, or with PCA off, it's skipped.
-
-So configuring arcsinh here is the optional stage-1 *dynamic-range compressor* that runs **before** the always-on z-score — it additionally tames within-marker skew and bright-pixel outliers that z-scoring alone can't (z-score is a linear rescale and leaves a skewed marker's outliers as extreme values). If you configure nothing, clustering uses z-score (+ conditional PCA) on the raw values.
+If you set no transform here, clustering runs on z-scored raw values. arcsinh adds one thing z-scoring cannot: it reduces extreme high values within a marker.
 
 ### 4.3 Create classes & Class Control
 
 **Menu:** *Extensions → SP Classify → Class Control...*
 
-A 4-tab dialog for managing the QuPath class panel **and** the labels saved on disk under `<project>/celltune/image-labels/`.
+A dialog with 4 tabs for managing QuPath's class list **and** the labels saved under `<project>/celltune/image-labels/`.
 
 #### Add tab
-Type a class name, click **Add Class**. Just adds it to QuPath's class panel — no label files touched.
+Type a class name and click **Add Class**. This adds the class to QuPath's class list only. Label files are not changed.
 
 #### Delete tab
 - Pick a class from the list.
-- Tick **Also remove labels with this class from all image-label files** to scrub it from every saved per-image label JSON. Leave unticked to only remove it from the class panel (labels stay on disk, invisible).
+- Tick **Also remove labels with this class from all image-label files** to remove the class's labels from every saved label file. Leave it unticked to remove the class from the class list only. The saved labels are kept on disk and are still used for training.
 - **Delete Selected Class** (red) — asks for confirmation.
 
 #### Merge tab
-- Multi-select source classes (Ctrl/Cmd+click), then either type a target name or pick one from **Existing**.
-- **Merge Selected → Target** rewrites every matching label across all images. The original name is preserved inside the label string: `test1` merged into `myType` is stored on disk as `test1-mergedInto(myType)`. Training sees only the effective class (`myType`); the audit trail makes the merge fully reversible.
+- Select one or more source classes (Ctrl/Cmd+click), then type a target name or pick one from **Existing:**.
+- **Merge Selected → Target** renames every matching label in all images. The original name is kept in the saved label: `test1` merged into `myType` is saved as `test1-mergedInto(myType)`. Training uses the target class (`myType`). Undo it from the **Undo Merge** tab.
 
 #### Undo Merge tab
-- Pick a class that was previously the merge target (the combo scans label files for `-mergedInto(...)` patterns).
-- **Undo Merge for Selected Class** — restores every label to its original name and re-adds the source `PathClass` to QuPath's class panel. The target class is **not** deleted; you can drop it from the Delete tab if you no longer want it.
+- Pick a class that was a merge target. The list shows classes found in `-mergedInto(...)` labels.
+- **Undo Merge for Selected Class** — restores each label to its original name and adds the original class back to the class list. The target class is **not** deleted. Remove it from the **Delete** tab if you no longer need it.
 
 ### 4.4 Channel mapping for review (marker table)
 
-Optional. A **marker table** (also called the **channel mapping**) maps each cell type to the image channels that identify it, so [review mode](#7-after-training--review-mode) can auto-switch channel visibility to the channels relevant to each predicted cell — land on a predicted `CD4T` cell and the viewer can show the `CD4`/`CD3` channels automatically.
+Optional. The **channel mapping** lists which image channels to show for each class. In [Review Mode](#7-after-training--review-mode), the viewer then shows only those channels for the current cell. For example, for a cell predicted as `CD4T` it shows CD4 and CD3. (The CSV file version is called a marker table in the **Import** menu.)
 
-The recommended way to build and maintain it is the **Channel Mapping editor**. CSV import/export remains available for sharing a mapping between projects and for legacy tables.
+Build and edit the channel mapping in the **Channel Mapping editor**. Use CSV import and export to share a channel mapping between projects or to load an existing marker table.
 
-**Menu:** *Extensions → SP Classify → Channel Mapping (Review Display)...* — or the **Edit channel mapping…** button in the Review Mode window, beneath the two auto-channel checkboxes.
+**Menu:** *Extensions → SP Classify → Channel Mapping (Review Display)...* — or the **Edit channel mapping…** button in the Review Mode window, below the two auto-channel checkboxes.
 
-The editor needs an **open image**, because that image's channels are the choices you pick from
-(otherwise an error asks you to open one first). It is **non-modal**, so the viewer stays usable
-while it is open.
+Open an image before you open the editor. The editor lists that image's channels; if no image is open, an error asks you to open one. You can keep using the viewer while the editor is open.
 
-- **Left — classes.** Your project's classes, plus any class the trained classifier or labels know
-  about, plus any marker-table entry that matches no class. Such an entry is shown in *italic* and
-  tagged **(not a project class)** — an *orphan*. Orphans are kept unless you **Clear** them. A CSV
-  entry whose name differs from a project class only in case, spacing or punctuation (e.g. `CD4 T`
-  vs `CD4T`) is merged into that class and saved under the project class's exact name.
-- **Right — channels.** The open image's channels as a filterable checklist, each shown with its
-  `(C1)`, `(C2)`… index. Tick the channels review should show for the selected class. A note above
-  the list explains the entry (it came from a CSV and how each name resolved, a gating rule was kept
-  unchanged, the entry was renamed, it is an orphan, some channels are not in this image, etc.).
+- **Left — classes.** The project's classes, classes known to the trained classifier or labels, and any channel-mapping entry that matches no class. An entry that matches no class (an *orphan*) is shown in *italics* and tagged **(not a project class)**. It is kept until you click **Clear**. A CSV entry whose name differs from a project class only in case, spacing or punctuation (e.g. `CD4 T` vs `CD4T`) is merged into that class and saved under the project class's name.
+- **Right — channels.** The open image's channels as a checklist with a filter box. Each channel shows its `(C1)`, `(C2)`… index. Tick the channels to show for the selected class. A note above the list describes the selected entry: where it came from, how each name was matched, and any channels missing from this image.
 
-Each class carries a status glyph against the open image:
+Each class shows a status symbol for the open image:
 
-| Glyph | Meaning |
+| Symbol | Meaning |
 |---|---|
 | ✓ | Every channel matched exactly. |
 | ≈ | Matched, ignoring case / spacing / punctuation. |
@@ -278,72 +267,52 @@ Each class carries a status glyph against the open image:
 | ✗ | Nothing matches. |
 | – | No channels set — review leaves the display unchanged for that class. |
 
-Entries still driven by imported CSV marker names are tagged **[CSV]**.
+Entries that still use marker names from an imported CSV are tagged **[CSV]**.
 
 **Per-class buttons**
 
-- **Clear** — removes the class's mapping. For an orphan this deletes the entry; for a rule-format
-  entry, review falls back to the rule's markers.
-- **Pin matches** — replaces this entry's name-matched CSV markers with the exact channels they
-  currently resolve to. Names that match nothing are dropped and listed.
-- **Preview** — shows that class's channels in the viewer right now.
+- **Clear** — removes the class's channel mapping. For an orphan, this deletes the entry. For a rule-format entry, review uses the rule's markers instead.
+- **Pin matches** — replaces the entry's CSV marker names with the exact channel names they match in the open image. Names that match no channel are removed, and a list of them is shown.
+- **Preview** — shows that class's channels in the viewer now.
 
 **Bottom buttons**
 
-- **Import CSV…** — same formats as *Import ▸ Marker Table*. It replaces what the editor shows and is
-  **not saved until you press Save**. A summary reports *N exact, N approximate, N unmatched, N not
-  project classes*.
-- **Export CSV…** — writes the current mapping out (formats [below](#simple-format)).
-- **Pin all matches** — **Pin matches** for every entry at once.
-- **Save** — writes the mapping to the project. If review is running, the current cell's channels
-  are re-applied immediately.
-- **Cancel** — closes the editor; asks before discarding unsaved changes.
+- **Import CSV…** — reads the same formats as *Extensions → SP Classify → Import → Marker Table...*. It replaces what the editor shows and is **not saved until you click Save**. A summary reports *N exact, N approximate, N unmatched, N not project classes*.
+- **Export CSV…** — writes the current channel mapping to a CSV (formats [below](#simple-format)).
+- **Pin all matches** — runs **Pin matches** on every entry.
+- **Save** — saves the channel mapping to the project. If review is running, the current cell's channels are updated straight away.
+- **Cancel** — closes the editor. If you have unsaved changes, it asks before discarding them.
 
-**Scan project channels** reads every project image's channel names in the background (cancellable).
-Channels missing from some images are listed with `[n/N images]`; channels that exist only in other
-images are added to the list marked *not in this image*. Opening each image's server can take a
-while on big projects.
+**Scan project channels** opens every image in the project to read its channel names. It runs in the background and can be slow on large projects; click **Cancel scan** to stop it. Channels missing from some images are listed with `[n/N images]`. Channels found only in other images are added to the list and marked *not in this image*.
 
-**How many channels?** There is **no limit** per class (the old 5-marker cap is gone). Above 8 the
-editor shows a soft warning that the composite may be hard to read; it never blocks you.
+**How many channels?** There is no limit on channels per class. Above 8, the editor shows a warning that the combined image may be hard to read. You can still save.
 
 #### Fixing a CSV that picks the wrong channels
 
-1. Open an image and the editor, then **Import CSV…**.
+1. Open an image and the editor, then click **Import CSV…**.
 2. Look for `~`, `!` and `✗` rows — those matched only by partial name, only in part, or not at all.
 3. Select each such class and fix the ticks on the right.
-4. Click **Pin all matches** to lock the good matches to exact channels, then **Save**.
+4. Click **Pin all matches** to save the correct matches as exact channel names, then click **Save**.
 
 #### Where it is stored
 
-The mapping is **per project**, saved to `<project>/celltune/marker-table.json`. It survives QuPath
-restarts, and each project keeps its own mapping: switching projects loads that project's mapping
-(a project without one starts empty). To reuse a mapping in another project, **Export CSV…** and
-**Import CSV…** it there.
+The channel mapping is saved per project, in `<project>/celltune/marker-table.json`. It is kept after QuPath restarts. Opening a different project loads that project's channel mapping (a project without one starts empty). To reuse a channel mapping in another project, click **Export CSV…**, then **Import CSV…** in the other project.
 
-The file is now schema **version 2**, which adds an optional per-entry `channels` list holding the
-exact channel names you ticked. Older versions of the extension can still read it — they ignore the
-exact channels and use the markers.
+Older versions of SP Classify can open this file but ignore the exact channels you ticked.
 
-The two review checkboxes (**Auto-select channels during review** and **Auto-adjust brightness/contrast
-of shown channels**) remember their state across review windows and QuPath restarts.
+The two review checkboxes (**Auto-select channels during review** and **Auto-adjust brightness/contrast of shown channels**) keep their setting across review windows and QuPath restarts.
 
 #### CSV import and export
 
-**Extensions ▸ SP Classify ▸ Import ▸ Marker Table...** is unchanged and both formats below still
-work (the editor's **Import CSV…** reads the same files). Reading is more forgiving than before:
+**Extensions → SP Classify → Import → Marker Table...** and the editor's **Import CSV…** accept both formats below:
 
-- Quoted fields may contain commas (RFC 4180).
-- The UTF-8 byte-order mark that Excel adds is ignored (it previously broke rule-format CSVs).
-- Extra columns that aren't described below are ignored.
+- Fields in quotes may contain commas.
+- The byte-order mark that Excel adds is ignored.
+- Extra columns not described below are ignored.
 
 ##### Simple format
 
-A CSV with `Marker1`–`Marker5` columns, plus any further columns whose header starts with
-`Marker` (`Marker6`, `Marker7`, …) — there is no upper limit. Trailing columns may be left blank.
-Exports widen to as many `MarkerN` columns as needed (at least 5). A ready-to-edit example
-lives at
-[`examples/marker-table-example.csv`](https://github.com/mikemcka/qupath-extension-sp-classify/blob/main/examples/marker-table-example.csv).
+A CSV with `Marker1`–`Marker5` columns, plus any further columns whose header starts with `Marker` (`Marker6`, `Marker7`, …), with no upper limit. Trailing columns may be blank. Exports have as many `MarkerN` columns as needed (at least 5). An example file to copy and edit is at [`examples/marker-table-example.csv`](https://github.com/mikemcka/qupath-extension-sp-classify/blob/main/examples/marker-table-example.csv).
 
 ```csv
 CellType,Marker1,Marker2,Marker3,Marker4,Marker5
@@ -356,31 +325,15 @@ Macrophage,CD68,CD163,CD11b,,
 
 ##### How names are matched
 
-> **Matching is tolerant — but the `CellType` column should track your class names**
->
-> The `CellType` column should match the class names you assign to labelled cells. Matching is
-> **case-, spacing-, and punctuation-insensitive**, so `CD4 T`, `cd4t`, and `CD4-T` are treated
-> as the same type. `Marker` names are matched to image channels the same way, so a channel
-> named `CD3 (Opal 570)` still matches the marker `CD3`.
->
-> If a predicted type isn't found in the table, or none of its markers match any channel, the
-> viewer's channels are **left unchanged** (nothing is hidden).
->
-> Matching uses the image's **own channel names**. Earlier versions matched against QuPath's
-> display names, which append ` (C<n>)` (e.g. `CD3 (C4)`), so exact matches rarely fired and `CD3`
-> could also light up `CD31`. If a table ever showed the wrong channels, re-check it in the
-> editor. Names typed as display names (with the `(C4)` suffix) still work.
->
-> Exact channels chosen in the editor are matched **verbatim first**; if an image lacks that exact
-> name, the usual tolerant matching is used. So a mapping made on one image works on others whose
-> channel names are the same, or cosmetically different. Channels stored in the mapping but absent
-> from the current image are kept, not discarded.
+> - `CellType` must match your class names. Case, spaces and punctuation are ignored (`CD4 T` = `cd4t` = `CD4-T`).
+> - Marker names are matched to channel names the same way. `CD3` matches a channel named `CD3 (Opal 570)`.
+> - Names are matched against the image's own channel names, not QuPath's display names with ` (C4)` added. Names typed with the `(C4)` suffix still work.
+> - Channels you ticked in the editor are matched by exact name first. If that name is not in the image, the matching above is used. Channels not in the current image are kept for other images.
+> - If a class is not in the table, or none of its markers match a channel, the viewer channels are not changed.
 
 ##### Rule format (gating)
 
-The importer also accepts a **rule format** for composite gating, auto-detected from a
-`PrimaryMarker` column. See **[Binary + composite workflow](#6-binary--composite-workflow-in-detail)** for how gating
-rules are written and applied.
+The importer also accepts a **rule format** for composite gating. A file with a `PrimaryMarker` column is read as rule format. See **[Binary + composite workflow](#6-binary--composite-workflow-in-detail)** for how gating rules are written and applied.
 
 ```csv
 CellType,PrimaryMarker,SecondaryMarker,TertiaryMarker
@@ -388,9 +341,7 @@ CD8T,CD8&CD3,CD45,CD103|CD45RA
 Macrophage,CD68|CD163|CD206,,CD14|CD38|VIM
 ```
 
-The rule format may also carry an optional `DisplayChannels` column — **pipe-separated exact
-channel names** — which *Export* writes when exact channels exist. Older versions of the extension
-ignore it.
+The rule format can also have a `DisplayChannels` column: exact channel names separated by `|`. **Export CSV…** writes this column when exact channels are set. Older versions of SP Classify ignore it.
 
 ---
 
@@ -398,108 +349,100 @@ ignore it.
 
 ### 5.1 Initial manual labelling
 
-Click **Manual Label Mode** in the sidebar. A floating toolbar appears:
+Click **Manual Label Mode** in the sidebar. A floating toolbar opens:
 
 ![Manual label mode](doc_images/manual_label_mode.png)
 
-- Click a cell in the QuPath viewer → its ID and current class show at the top, the status dot turns lime if labelled, white if not.
-- A **magenta ring** marks the selected cell (a lightweight overlay — won't slow down 50k+ cell images).
-- Up to 12 quick-access class buttons appear inline; the rest live under **All Classes ▼**.
-- **Auto-advance to next detection** — when ticked, assigning a label automatically jumps to the next cell.
+- Click a cell in the viewer. The toolbar shows its ID and current class. The status dot is lime if the cell has a class and white if it has none.
+- The selected cell has a magenta ring.
+- Up to 12 class buttons are shown in the toolbar. Other classes are under **All Classes ▼**.
+- **Auto-advance to next detection**: when ticked, the next cell is selected after you assign a label.
 
-**How many to label?** Aim for **at least 20–30 cells per class** before your first training run. The extension will refuse to train with fewer than 10 labelled cells total. You can — and should — add more after each review cycle.
+**How many cells to label:** label at least 20–30 cells per class before the first training run. Training does not start with fewer than 10 labelled cells in total. Add more labels after each review cycle.
 
-> The **Model 1** / **Model 2** buttons only appear once you've trained at least once. They let you accept a prediction with one click. Background colour: blue = M1, pink = M2.
+> After the first training run, two more buttons appear: **Model 1: CD8 (87%)** (blue) and **Model 2: CD4 (65%)** (pink). Each shows that model's predicted class and confidence for the selected cell. Click one to accept that prediction.
 
 ### 5.2 Choose images to apply the classifier to
 
-Click **Apply to which images... (N)** above the train button.
+Click **Apply to which images...** in the sidebar.
 
 ![Images to apply](doc_images/select_images.png)
 
-- Dual-list selector. Left = images the classifier will predict on, right = excluded.
-- Per-list search and Move-all/Move-selected arrows.
-- The **currently open image is always included** and can't be moved out.
-- Click **OK**; the button label now shows the count, e.g. `Apply to which images... (12)`.
+- The left list holds the images the classifier will be applied to. The right list holds excluded images.
+- Use the search boxes and the arrow buttons (`>`, `>>`, `<`, `<<`) to move images between the lists.
+- The open image is always included and cannot be moved.
+- Click **OK**. The button then shows the number of images, e.g. `Apply to which images... (12)`.
 
-This is a quick way to reduce prediction times but only focusing on one or a few images.
+Choose fewer images to make the apply step faster.
 
 ### 5.3 CPU threads and Images at once
 
 ![Compute settings: Rounds, Max depth, CPU threads, Images at once](doc_images/classifier_compute_settings.png)
 
-Two speed controls. They do different jobs, so they are separate numbers. (Labels get cut off in a narrow panel — widen it, or hover for the full text.)
+These two settings control speed. If their labels are cut off, widen the panel or hold the mouse over a control to see its tooltip.
 
-**CPU threads — makes training faster.**
-Leave at **0**, which means "use all CPU resources. Lower it only if you want to keep working in QuPath while a long training run happens in the background, or if you're sharing a compute node with someone. Your choice is remembered next time.
+**CPU threads** sets how many processor threads training uses. The default is **0**, which uses all processors. Lower it to keep QuPath responsive during training, or when you share a compute node. The value is remembered between sessions. Changing it can change results very slightly, so use the same value when you compare two training runs.
 
-> One thing to know: changing this number can nudge the results very slightly. Neither setting is more correct. If you're comparing two training runs, just use the same number for both.
-
-**Images at once — makes *applying* the classifier to other images faster.**
-This only matters after training, when the classifier is being applied to the other images you picked. Each image being processed has to be fully loaded, so this uses memory rather than processor. **1** on a 16 GB machine, **2–3** on 32 GB. Maximum 8. If you set it too high, QuPath may run out of memory.
+**Images at once** sets how many images are classified at the same time after training. The default is 1 and the range is 1–8. It has no effect on training. Each image is loaded fully into memory, so a higher value uses more memory. Suggested values: 1 on a 16 GB machine, 2–3 on 32 GB. If QuPath runs out of memory, set it back to 1.
 
 ### 5.4 Pick the right settings
 
-The defaults are tuned for typical multiplex panels. Adjust as follows:
+Most users can leave these at their defaults.
 
-| Setting | Default | Turn ON when… | Turn OFF when… |
+| Setting | Default | Turn on when… | Turn off when… |
 |---|---|---|---|
-| **Pool labels from all images** | ✅ | (always; auto-on in binary mode) | training a per-image model intentionally |
-| **Enable data balancing** + `SMOTE + Tomek` | ✅ | one class << others (typical multiplex) | classes are already balanced or you want raw counts |
-| **Auto-tune hyperparameters** | ❌ | first/last build of a new panel, and you can leave it overnight | iterating fast; defaults known to work |
-| **Early stopping** | ✅ | (always — no downside) | reproducing a paper with a fixed round count |
-| **Train/val metrics** | ✅ | you want the Training Metrics report | iterating fast — it costs about ⅓ of training time |
-| **Show top 10 feature importance** | ✅ | (always — cheap) | reducing UI clutter |
-| **Auto-prune features** | ✅ | (always — non-destructive, faster training) | running a reproducible benchmark |
-| **Restrict to features shared with imported data** | ❌ | merging labels imported from a different panel | training on this project only |
-| **Sample current image only** | ❌ | drilling into one tricky FOV | (default — covers whole project) |
+| **Pool labels from all images** | ✅ | recommended (always on in binary mode) | you want a model trained on the open image's labels only |
+| **Enable data balancing** + `SMOTE + Tomek` | ✅ | one class has many fewer labels than others | classes are already balanced, or you want to train on the labels as they are |
+| **Auto-tune hyperparameters** | ❌ | you can leave training running for several hours (see **Auto-tune** below) | you are still adding labels |
+| **Early stopping** | ✅ | recommended | you need a fixed number of rounds, e.g. to reproduce a published setting |
+| **Train/val metrics** | ✅ | you want the Training Metrics report | you are still adding labels (see below) |
+| **Show top 10 feature importance after training** | ✅ | recommended | you do not want the chart to open after training |
+| **Auto-prune features (drop near-constant & redundant)** | ✅ | recommended (faster training; no measurements are deleted) | you need every selected feature used, e.g. for a benchmark |
+| **Restrict to features shared with imported data** | ❌ | you imported labels from a project with a different panel | you train on this project's labels only |
+| **Sample current image only** | ❌ | you want to review cells from the open image only (§5.7) | you want to review cells from every image (default) |
 
-**Resampling strategies** (visible when Enable data balancing is on):
+**Resampling strategies** (the **Strategy:** dropdown, shown when **Enable data balancing** is ticked):
 
-**Leave as default if you don't understand this** This is complicated and involves generating synthetic data or removing datapoints from a feature set which will vary as your training dataset changes over time.
+Leave this at the default (`SMOTE + Tomek`) unless you have a specific reason to change it.
 
 | Strategy | Effect |
 |---|---|
-| `NONE` | No resampling |
-| `SMOTE` | Synthetic minority oversampling (k=5 nearest same-class neighbours) |
-| `ADASYN` | Like SMOTE but concentrates synthetics on hard-to-classify minorities |
-| `TOMEK` | Removes majority-class members of mutual nearest-neighbour pairs (cleans boundary) |
-| `SMOTE + Tomek` (default) | SMOTE, then Tomek cleanup |
-| `ADASYN + Tomek` | ADASYN, then Tomek cleanup |
+| `None` | No resampling |
+| `SMOTE` | Adds synthetic cells to small classes, made from each cell's 5 nearest cells of the same class |
+| `ADASYN` | Like SMOTE, but adds more synthetic cells where a small class is hard to separate from other classes |
+| `Tomek links` | Finds pairs of cells of different classes that are each other's nearest neighbour, and removes the cell from the larger class |
+| `SMOTE + Tomek` (default) | SMOTE, then Tomek links |
+| `ADASYN + Tomek` | ADASYN, then Tomek links |
 
-Defaults work for ~90% of cases. Switch to `SMOTE` alone if Tomek is removing too much real signal; switch to `ADASYN` if a minority class lives in a hard region of feature space.
+Use `SMOTE` alone if Tomek links removes too many labelled cells (the training log shows how many it removed). Use `ADASYN` if a small class is often confused with a larger one.
 
-**Train/val metrics.** On by default. This is what fills in the **Training Metrics** report (per-class scores). Producing it means training each model a second time on part of your data, which costs roughly a third of the total training time. Untick it while you're still adding labels and re-tick it for the run you want to keep — your classifier is identical either way, you just don't get the report.
+**Train/val metrics** produces the **Training Metrics** report (§5.6). It adds about a third to training time and does not change the trained classifier. Untick it while you are still adding labels, and tick it again for your final run.
 
-**Auto-tune is slow.** It trains 200 models to search for better settings. On a big panel that's hours, not minutes — plan for overnight. The training log tells you how many it's about to do.
+**Auto-tune** tests different model settings and keeps the best settings for each model. It trains 2 × **Trials** × **CV folds** models. The defaults are 20 trials and 5 folds, which is 200 models. Trials can be set from 5 to 100 and CV folds from 2 to 10; these controls are shown when **Auto-tune hyperparameters** is ticked. With many features and classes this can take several hours. The training log shows the number of models before it starts.
 
-**Models 1 & 2.** Default pair is **XGBoost + LightGBM**. Random Forest is also available. Keep the two model types **different** — that's the whole point of dual-model disagreement. Auto-tune runs independently per model.
+**Model 1 and Model 2.** The default is XGBoost (Model 1) and LightGBM (Model 2). Random Forest is also available. Use two different model types: review mode depends on the two models disagreeing. Training runs on the CPU only.
 
-**Training uses the CPU.** This is a CPU-only build; there is no benefit at this scale anyway — a graphics card only starts to pay off with far more labelled cells than a typical panel has.
+**Rounds / Max depth.** The defaults are 500 rounds (range 50–1000) and depth 6 (range 2–15).
 
-**Rounds / Max depth.** Default 500 rounds, depth 6.
+- With **Early stopping** ticked (the default), Rounds is a maximum. Each model stops adding rounds when it stops improving.
+- With **Early stopping** unticked, every round is trained. Lower Rounds to reduce training time.
 
-**Rounds is a limit, not a target** — as long as **Early stopping** is on (it is by default). Each model keeps adding rounds until it stops getting better, then stops on its own. So a model that only needs 130 rounds uses 130 and the setting costs you nothing; a model that would still be improving at 200 is no longer cut off. That's why the default is generous.
-
-> ⚠️ **If you untick Early stopping, this becomes a literal count** and every round is trained. 500 rounds will then take much longer than 200. Lower it if you turn early stopping off.
-
-The training log tells you what each model actually used: `best round 127/500` means it converged comfortably, while a number close to your limit means it was still improving and you could raise it further.
+The training log shows the rounds each model used, e.g. `XGBoost early stopping: best round 127/500`. If the number is close to the maximum, raise **Rounds**.
 
 ### 5.5 Train
 
-Click **Train**. A progress dialog shows the current step (feature extraction, balancing, fold training, etc.). Before training starts, a timestamped backup of the label store is written to `<project>/celltune/labels_backup_*.json`.
+Click **Train**. A progress window shows the current step. Before training starts:
 
-**Before it starts**, SP Classify checks whether you have enough memory. If it looks tight, you get a warning with a Proceed/Cancel choice — cancelling now is cheaper than running out of memory twenty minutes in. It's a rough check, so it catches obvious problems rather than guaranteeing success.
+- a backup of your labels is saved to `<project>/celltune/labels_backup_*.json`.
+- SP Classify estimates how much memory training needs. If the estimate is more than 80% of the memory available to QuPath, a warning asks **Proceed anyway?** The estimate is approximate. To give QuPath more memory, set **Edit → Preferences → Maximum memory** and restart QuPath. To need less memory, select fewer features or set **Strategy:** to `None`.
 
-Status bar after success: `Training complete — 523 cells classified, 47 disagreements.`
+When training finishes, the sidebar status line shows e.g. `Training complete — 523 cells classified, 47 disagreements.`
 
 #### The training log file
 
-Every run saves a copy of its log to `<project>/celltune/logs/`. The on-screen log disappears when you close the progress window; this one doesn't, and it survives a crash. The 20 most recent are kept. (Without a project there's nowhere to save it, so training just runs without one.)
+Each training run saves its log to `<project>/celltune/logs/`. The 20 most recent logs are kept. The file is kept after the progress window closes and after a crash. If no project is open, no log file is saved.
 
-The log starts with everything about the run — cell and label counts, every setting you used, your memory — so you can send it to someone without having to explain the setup.
-
-It ends with where the time went, slowest first:
+The log starts with the cell and label counts, every setting used and the available memory. It ends with the time taken by each step, slowest first:
 
 ```
 ── Where the time went ──────────────────────────────────
@@ -509,30 +452,30 @@ It ends with where the time went, slowest first:
   predict all cells           39.88s    5.6%
 ```
 
-Check this first if training feels slow — it tells you which step to actually do something about. If a run fails, the last line names the step it failed on.
+If training is slow, this table shows which step took longest. If a run fails, the last line names the step that failed.
 
 ### 5.6 Inspecting the result
 
-Two views are unlocked after a successful run:
+Three buttons become available after training: **Agreement Confusion Matrix**, **Training Metrics** and **Feature Importance...**.
 
 #### Confusion Matrix (button)
 
-The **inter-model agreement** matrix — rows = XGBoost prediction, columns = LightGBM prediction.
+**Agreement Confusion Matrix** compares the two models' predictions for every cell. Rows are Model 1's predictions and columns are Model 2's. (The axis titles read `Model 1 (XGBoost)` and `Model 2 (LightGBM)` whichever model types you chose.)
 
-- **Diagonal cells (blue)** — both models agreed on this class.
-- **Off-diagonal cells (orange/red)** — the two models disagreed; these are the cells that go into Review Mode.
-- **Right column** — per-class recall-style %.
-- **Bottom row** — per-class precision-style %.
-- **Far right** — per-class Dice (inter-model F1).
-- **Summary line:** `Total: X | Agreement: Y (Z%) | Disagreement: A (B%) | Macro Dice: D`.
+- **Diagonal (blue):** cells where both models chose the same class.
+- **Off the diagonal (orange/red):** cells where the models chose different classes. Review mode samples from these cells.
+- **Right column:** for each Model 1 class, the percentage of its cells that Model 2 also assigned to that class.
+- **Bottom row:** for each Model 2 class, the percentage of its cells that Model 1 also assigned to that class.
+- **Dice column:** agreement score per class, from 0 (no agreement) to 1 (full agreement).
+- **Summary line:** `Total: X cells | Agreement: Y (Z%) | Disagreement: A (B%) | Macro Dice: D`. Macro Dice is the mean Dice over all classes.
 
-A diagonal-dominant matrix means the two models broadly agree; large off-diagonal hotspots show systematic confusion pairs (e.g. CD4/CD8 cross-talk) — those are your priority for the next labelling round.
+If most cells are on the diagonal, the two models mostly agree. A large value off the diagonal shows two classes the models often confuse (e.g. CD4 and CD8). Label more cells of those two classes in the next round.
 
 ![Inter-model agreement confusion matrix](doc_images/agreement_confusion_matrix.png)
 
 #### Training Metrics (button)
 
-Per-class **precision / recall / F1 / support** for each model, computed on a held-out **20% stratified validation split**:
+**Training Metrics** shows precision, recall, F1 and support (number of cells) for each class and each model. These are calculated on 20% of the labelled cells of each class, held back from training:
 
 ```
 class            precision   recall      f1   support
@@ -546,84 +489,85 @@ macro F1                              0.894       500
 weighted F1                           0.903       500
 ```
 
+Tick **Show 80% training-set rows (for over-fit diagnosis)** to also show the scores on the training cells.
+
 ![Training metrics](doc_images/training_metrics.png)
 
-There's also a **Validation Confusion Matrix** view (true class × predicted class on the same 20% fold), with both absolute counts and row-normalised recall heatmaps, plus a per-row diagonal = recall.
+**Validation Confusion Matrix (XGBoost)…** shows the true class (rows) against Model 1's predicted class (columns) for the same 20% of cells. It has two heatmaps: cell counts, and counts as a percentage of each row. The diagonal of the percentage heatmap is each class's recall.
 
 ![Validation confusion matrix](doc_images/validation_confusion_matrix.png)
 
 **Exports:**
-- **CSV** — long format `split,model,class,precision,recall,f1,support`, with summary rows tagged `__accuracy__`, `__macro_f1__`, `__weighted_f1__` so they're easy to filter in pandas/R.
-- **PNG** — side-by-side validation confusion-matrix heatmaps.
+- **Download CSV…** (Training Metrics window): long format `split,model,class,precision,recall,f1,support`. Summary rows have the class `__accuracy__`, `__macro_f1__` or `__weighted_f1__`, so you can filter them out in pandas or R.
+- **Download PNG…** (Validation Confusion Matrix window): both heatmaps side by side. This window also has **Download CSV…**.
 
-> **Don't trust an F1 of 0.95 on its own.** A 20% stratified split from the same image (or even from a tight cluster of similar images) overstates how well the model will generalise. The honest test is: **open a different slide, predict, and visually scan the results**, then check the Project Prediction Summary (§8). If a slide has predictions that look wrong by eye, the F1 lied — go label some of its cells.
+> **A high F1 score does not mean the classifier works on new images.** The validation cells come from the same images as the training cells, so F1 overestimates performance on other images. To check, open a different image, apply the classifier, look at the results, and check the Project Prediction Summary (§[8](#8-project-prediction-summary)). If predictions on an image look wrong, label some of its cells and retrain.
 
 #### Feature Importance (button)
 
-Top-N (up to 10) features by **mean |SHAP|** per class. Horizontal bars, one colour per class, dropdown to switch classes. SHAP is averaged across whichever models are active (TreeSHAP for XGBoost/LightGBM, normalised split counts for Random Forest).
+**Feature Importance...** shows the 10 features that most affect each class's prediction (mean |SHAP| value), as horizontal bars. Use the **Class:** dropdown to switch class. Values come from the XGBoost model and from any Random Forest model. LightGBM is not included, so with the default pair (XGBoost + LightGBM) the chart shows XGBoost only.
 
-Use it to spot features the model is over-relying on (e.g. if `Cell: DAPI Mean` dominates every class, it probably shouldn't be in the feature set — de-select it in Select Features, §[4.1](#41-select-features); note that changing the arcsinh cofactor won't fix this, since the tree models are invariant to that monotone transform). It's also where a stray feature you forgot to de-select in Select Features (§4.1) tends to show up — a non-biological column like a cell index or centroid coordinate ranking near the top is a red flag that it leaked into training.
+Use it to find features to remove:
+
+- If one feature (e.g. `Cell: DAPI Mean`) ranks highest for every class, de-select it in Select Features (§[4.1](#41-select-features)) and retrain.
+- If a non-biological column, such as a cell ID or a centroid coordinate, ranks near the top, it was included in training by mistake. De-select it in Select Features and retrain.
 
 ![Feature importance showing a leaked cell-index feature](doc_images/index_feature_leakage.png)
 
-Here `kronos_cell_id` (a cell index) dominates the SHAP ranking — a clear sign it leaked into training and should be de-selected in Select Features.
+In this example `kronos_cell_id` (a cell index) ranks highest. De-select it in Select Features.
 
 ### 5.7 Optional — restrict sampling to specific annotations
 
-Two controls above the buttons:
+Two controls above **Enter Review Mode** limit which cells review mode samples:
 
-- **Sample current image only** — limits review/sampling to the open image.
-- **Filter by annotation keywords** — comma-separated, case-insensitive substring match against annotation names. Example: `Tumour, Margin` → only cells whose centroid falls inside an annotation whose name contains "Tumour" or "Margin" are eligible.
+- **Sample current image only** (checkbox): sample from the open image only.
+- **Specify annotations** (text field): enter words separated by commas, e.g. `Tumour, Margin`. Only cells whose centre is inside an annotation whose name contains one of the words are sampled. Case is ignored.
 
 ![Specify annotations before entering review mode](doc_images/review_mode_specifiy_annotations.png)
 
-Leave both blank to sample across every cell in every project image (recommended default).
+Leave the box unticked and the field empty to sample from every cell in every project image (the default).
 
 ---
 
 ## 6. Binary + composite workflow in detail
 
-Use this when you want **per-marker** classifiers (one for CD3 positive/negative, another for CD8 positive/negative, etc.) and then combine them into composite cell types. Great for smaller panels or functional markers like Ki67.
+Use this to train one classifier per marker (e.g. one for CD3 positive/negative, another for CD8 positive/negative) and then combine their results into composite classes. Use it for panels with few markers, or for markers that describe cell state, such as Ki67.
 
 ### 6.1 Create a binary classifier
 
 **Menu:** *Extensions → SP Classify → Binary Classifiers...*
 
-- **Create...** → enter a marker name (e.g. `CD3`). Marker names are sanitised to safe filesystem characters.
-- The marker is registered in `<project>/celltune/binary-registry.json` and a state file `<project>/celltune/binary/CD3.json` is created when you first train.
-
-Select the marker in the list and click **Open**. The dialog closes; the main sidebar switches into **Binary Mode** with a blue banner: `Active binary mode: CD3`.
+1. Click **Create...** and enter a marker name (e.g. `CD3`). Characters other than letters, digits, `.`, `_` and `-` are replaced with `_`. The name cannot start with `.` or `-`.
+2. Select the marker in the list and click **Open**. The dialog closes and the sidebar switches to **Binary Mode**, with the banner `Active binary mode: CD3` in blue.
 
 In binary mode:
-- The class buttons in Manual Label Mode are restricted to `CD3_pos` and `CD3_neg` (so you can't accidentally label across markers).
-- **Pool labels from all images** is auto-enabled and locked — each marker classifier always trains on its full pooled label set.
-- Settings, sampling, review, and metrics work exactly the same as multi-class.
+- The Manual Label Mode class buttons are limited to `CD3_pos` and `CD3_neg`.
+- **Pool labels from all images** is ticked and cannot be changed.
+- Settings, sampling, review and metrics work as in multi-class mode.
 
-Train, review, and iterate until you're happy. Then click **Exit Binary Mode** to return to multi-class.
+Repeat train → review → retrain until the Training Metrics F1 stops improving and the predictions look correct on images you did not label. Then click **Exit Binary Mode** to return to multi-class mode.
 
-Repeat for every marker you want in the composite.
+Repeat for each marker you want in the composite.
 
 ### 6.2 Composite classification
 
 **Menu:** *Extensions → SP Classify → Composite Classification...*
 
-- **Markers** — checkbox per trained binary classifier. **All** / **None** buttons above. Only markers that have been trained (have a saved XGBoost model) appear.
-- **Images** — checkbox per project image. **All** / **None** / **Current only** buttons above.
-- **Prepend current primary classification (colour follows primary)** — see below.
-- **Apply** — runs the classifiers.
+- **Markers**: one checkbox per trained binary classifier, all ticked by default. Markers you have not trained are not listed. **All** / **None** tick or untick every marker.
+- **Images**: one checkbox per project image, all ticked by default. Buttons: **All** / **None** / **Current only**.
+- **Prepend current primary classification (colour follows primary)**: see below.
+- **Apply**: runs the classifiers.
 
-**How it works:**
-- The currently open image is classified **in-memory** — viewer updates immediately, no save/reload.
-- Every other selected image is read from disk, classified, and written back (logged in the panel's text area).
-- Each cell gets a composite `PathClass` named by joining the marker results alphabetically:
-  - `CD3+:CD8-:CD45+` etc.
-  - `+` if the binary classifier's positive probability ≥ 0.5, else `-`.
+**What Apply does:**
+- The open image updates in the viewer immediately. Other selected images are opened, classified and saved. Progress is shown in the dialog's log.
+- Each cell gets a class made of the marker names in text sort order, each followed by `+` or `-`, e.g. `CD3+:CD45+:CD8-`. In text sort order `CD45` comes before `CD8`.
+- A marker is `+` when its binary classifier gives a positive probability of 0.5 or higher, and `-` otherwise.
 
-**Prepend current primary classification:**
-- When **off** (default): composite name is markers only (`CD3+:CD8-`), QuPath auto-assigns the class colour.
-- When **on**: each cell's current primary `PathClass` is captured **before** any reassignment and prepended (`Tumour:CD3+:CD8-`). The composite class's colour is set to the primary class's colour, so the viewer keeps your existing multi-class colouring. Cells with no current primary fall back to binary-only naming.
+**Prepend current primary classification** (off by default):
+- Unticked: the class name has the marker results only (`CD3+:CD8-`). QuPath assigns the colour.
+- Ticked: each cell's existing class is added to the front (`Tumour:CD3+:CD8-`), and the cell keeps the colour of its existing class. Cells with no class get the marker-only name.
 
-> Use the merge mode after you've already run a multi-class classifier — the multi-class result becomes the cell-type "backbone" and the binary classifiers add functional state.
+> Tick **Prepend current primary classification** after running a multi-class classifier, so each cell keeps its cell type and gains the marker results.
 
 ---
 
@@ -631,74 +575,86 @@ Repeat for every marker you want in the composite.
 
 **Button:** **Enter Review Mode** in the sidebar.
 
-Review mode samples the **disagreement** cells (where Model 1 ≠ Model 2) using a 5-tier strategy so you don't waste labelling effort on cells that are easy or already represented. The tiers run in order and each **claims** the cells it selects, so a later tier can never re-pick a cell an earlier one already took (no double-counting):
+Review mode shows you, one at a time, cells where Model 1 and Model 2 predict different classes (disagreement cells), so you can label them.
 
-| Tier | Goal | Default budget @ 256 cells |
+Click **Enter Review Mode**. A **Sampling Settings** dialog asks how many disagreement cells to review (default 200; the number available is shown). Cells you have already reviewed are not sampled again.
+
+Cells are picked in five tiers, in order. A cell picked in one tier is not picked again in a later tier.
+
+| Tier | Picks | Budget per 256 cells |
 |---|---|---|
-| **0 — FOV balance** | Stop one slide dominating | ~84 cells, prioritising FOVs with high disagreement rate |
-| **1 — Cell-type disagreement** | Cover the most confused classes | ~16 per class |
-| **2 — Rare cell types** | Don't ignore small populations | ~10 per rare type |
-| **3 — Preferred confusions** | User-specified pair (e.g. `CD4:CD8`) | ~8 per pair |
-| **4 — Random fill** | Use any remaining budget | up to 256 |
+| **0 — FOV balance** | cells from the images with the highest disagreement rate | 84 in total, up to 14 per image |
+| **1 — Cell-type disagreement** | cells from the classes with the highest disagreement rate | 112 in total, up to 16 per class |
+| **2 — Rare cell types** | cells from the classes with the fewest predicted cells | 60 in total, up to 10 per class |
+| **3 — Preferred confusions** | cells from chosen class pairs (e.g. `CD4:CD8`) | 40 in total, up to 8 per pair |
+| **4 — Random fill** | random disagreement cells, to fill the rest of the batch | the remainder |
 
-> The budgets above are calibrated for the default 256-cell batch. If you request a different sample size, every tier budget scales linearly (`× sampleSize / 256`, floored at 1 per tier), so the tier mix stays proportional — a smaller batch isn't just the first tier truncated.
+> Budgets scale with the number you enter: each is multiplied by (your number ÷ 256) and rounded, with a minimum of 1. There is no control for choosing class pairs, so tier 3 is always skipped.
 
-The cell currently under review is ringed in magenta in the viewer, with the toolbar showing each model's top prediction:
+The cell under review has a magenta ring in the viewer. The toolbar shows each model's prediction:
 
 ![Review mode — highlighted cell](doc_images/review_mode_highlighted_cell.png)
 
-You can Ctrl/Cmd-click several cells at once to label a group together; the toolbar header shows `→ clicked cell` for the active selection:
+To label a cell that is not in the queue, click it in the viewer. Ctrl-click (Cmd-click on macOS) to select several cells and label them together. The toolbar then shows `→ clicked cell` after the queue position, and the buttons label the clicked cells:
 
 ![Review mode — multiple clicked cells](doc_images/review_mode_clicked_multiple_cells.png)
 
 **Toolbar buttons during review:**
-- **Previous / Next / Skip** — navigate the queue.
-- **XGB: ClassName (89%)** — accept Model 1's top prediction; blue background.
-- **LGB: ClassName (76%)** — accept Model 2's top prediction; pink background.
-- **Both: ClassName (XX%)** — single combined button if M1 and M2 agree.
-- **Avg: ClassName (XX%)** — appears only when the two models' **averaged** probability points to a class that is neither model's own top pick; accepts that averaged prediction.
-- **All Classes ▼** — pick a different class if both models are wrong.
-- **Done** — exit; labels are merged back into the label store and saved per-image to `<project>/celltune/image-labels/`.
+- **Previous** / **Next** / **Skip**: move through the queue.
+- **XGB: CD8 (87%)** (blue): accept Model 1's prediction.
+- **LGB: CD4 (65%)** (pink): accept Model 2's prediction. The two buttons are labelled XGB and LGB even if you chose Random Forest for either model.
+- **Both: CD8 (90%)**: shown instead of the two buttons when the models agree. The percentage is the mean of the two models' confidence.
+- **Avg: Treg** (green, no percentage): shown only when averaging the two models' probabilities gives a class that neither model chose. Click it to accept that class.
+- **All Classes ▼**: choose any other class.
+- **Done**: close review and save your labels.
 
-The toolbar header also shows the **name(s) of the annotation region(s)** the current cell falls inside, in bold dark blue (e.g. `◆ Tumour, Stroma`), so you keep the spatial context without leaving review.
+The toolbar header also shows the names of any annotations containing the current cell, e.g. `◆ Tumour, Stroma`.
 
-Switching to a **different image** while a classifier is trained **auto-applies** its predictions to that image first, so you can review it immediately without a separate predict step.
+When you open a different image, its saved predictions are loaded. If it has none, the trained classifier is applied to it when you enter review mode, so you do not need a separate prediction step.
 
-If you have set up a channel mapping (§[4.4](#44-channel-mapping-for-review-marker-table)), tick **Auto-select channels during review** and the viewer will display only the channels mapped to whatever class the current cell was predicted as. The separate **Auto-adjust brightness/contrast of shown channels** box (off by default) additionally auto-sets each shown channel's display range per cell; leave it unticked to keep your own brightness/contrast. Both checkboxes remember their state across review windows and QuPath restarts.
+**Channel display.** If you have set up a channel mapping (§[4.4](#44-channel-mapping-for-review-marker-table)):
+- Tick **Auto-select channels during review** to show only the channels mapped to the current cell's predicted class.
+- Tick **Auto-adjust brightness/contrast of shown channels** (off by default) to also set each shown channel's display range for each cell. Leave it unticked to keep your own brightness/contrast settings.
 
-Beneath the checkboxes, an **Edit channel mapping…** button opens the [Channel Mapping editor](#44-channel-mapping-for-review-marker-table) (non-modal, so you can keep reviewing), and a **status line** says what the current cell is showing:
+Both checkboxes keep their setting after you close review mode or restart QuPath.
 
-- `CD8T → CD8, CD3` — the channels now displayed for the cell's class.
-- `No channels mapped for "X"` — that class has no mapping; the display is left alone.
-- `No channel in this image matches "X"'s mapping — display unchanged` (red) — the mapping names channels this image doesn't have.
-- `No channel mapping set — use Edit channel mapping…` — nothing is set up yet.
+**Edit channel mapping…** (below the checkboxes) opens the [Channel Mapping editor](#44-channel-mapping-for-review-marker-table). You can keep reviewing while it is open. When you save in the editor, the current cell's channels update immediately.
 
-Saving in the editor during review re-applies the channels to the current cell immediately.
+The status line below it shows what is displayed for the current cell:
 
-After review, click **Train** again — the new labels feed into the next cycle.
+- `CD8T → CD8, CD3`: the channels shown for the cell's class.
+- `No channels mapped for "X"`: the class has no mapping. The display is not changed.
+- `No channel in this image matches "X"'s mapping — display unchanged` (red): the mapping lists channels this image does not have.
+- `No channel mapping set — use Edit channel mapping… to choose channels per class.`: no mapping has been set up.
+
+After review, click **Train** again to train with the new labels.
 
 ---
 
-## 8. Project Prediction Summary - Experimental
+## 8. Project Prediction Summary
+
+> **Experimental.**
 
 **Menu:** *Extensions → SP Classify → Project Prediction Summary...*
 
-Cohort-level QC across every image in your project. Loads the saved `Pred_ALL` results from `<project>/celltune/image-predictions/` and runs an anomaly analysis. See [HOW_IT_WORKS_PREDICTION_SUMMARY](#anatomy-of-the-anomaly-score) below for the maths.
+Shows one row per project image, using the saved predictions in `<project>/celltune/image-predictions/`, and gives each image an anomaly score so you can find the images to check first. See [How the anomaly score is calculated](#anatomy-of-the-anomaly-score).
 
-> For a **cells-free** prescreen that works straight off the pixels — before any segmentation exists — see §[17 Image pixel prescreen](#17-image-pixel-prescreen-whole-image-qc-no-cells-needed).
+> To check images before cell segmentation, using pixel values only, see §[17 Image pixel prescreen](#17-image-pixel-prescreen-whole-image-qc-no-cells-needed).
 
 **Table columns:** Image, Predicted, Agreements, Disagreements, Agreement %, Anomaly, Flagged.
 
 **Filters:**
-- **Flagged only** — hide rows with no flag.
-- **Target class** — restrict to images where a specific rare class is enriched.
-- **Threshold preset** — *strict* (anomaly ≥ 1.5), *balanced* (≥ 0.5), *sensitive* (≥ 0.0, default — shows everything). This is a **display** filter; the analysis is not re-run.
+- **Flagged only**: hide images that have no flag.
+- **Target class:** show only images where the chosen class has the `RARE_ENRICHMENT` flag. The list contains only classes that have this flag in at least one image. Default: **All classes**.
+- **Threshold preset:** hide unflagged images whose anomaly score is below the preset: `strict` 1.5, `balanced` 0.5, `sensitive` 0.0 (default; shows every image). Flagged images are always shown. The analysis is not re-run.
 
 **Buttons:**
-- **Open Selected Image** — jumps QuPath to that image without saving the current one (deliberately fast for navigation).
-- **Export CSV** — flattened table of currently-visible rows.
+- **Open Selected Image**: opens the selected image.
+- **Export CSV**: saves the rows currently shown as a CSV file.
 
-**Details pane** (below the table) for the selected row: anomaly score, flag reasons, rare-enrichment summary, per-class counts.
+> ⚠️ **Open Selected Image discards unsaved changes in the current image without asking.** Save first (*File → Save*) if you have made changes.
+
+**Details pane** (below the table): for the selected image, shows the anomaly score, flag reasons, rare-class enrichment and the number of cells per class.
 
 ![Project Prediction Summary](doc_images/prediction_summary.png)
 
@@ -706,29 +662,25 @@ Cohort-level QC across every image in your project. Loads the saved `Pred_ALL` r
 
 For each image:
 
-1. **Composition distance** — Jensen-Shannon distance between this image's class-fraction distribution and the project-wide baseline (with Laplace smoothing).
-2. **Disagreement rate** — `disagreements / predicted`.
-3. Both signals are converted to **robust z-scores** (median + MAD, so one extreme image can't suppress the scale) across the cohort.
-4. `Anomaly score = 0.65 × max(0, z_composition) + 0.35 × max(0, z_disagreement)`.
+1. **Composition distance**: how different the image's class proportions are from the whole project (Jensen-Shannon distance).
+2. **Disagreement rate**: disagreements ÷ predicted cells.
+3. Both values are converted to robust z-scores across all images. These use the median and the median absolute deviation (MAD), so one extreme image does not change the scale for the others.
+4. `Anomaly score = 0.65 × max(0, z_composition) + 0.35 × max(0, z_disagreement)`. Negative z-scores count as 0.
+
+Composition has the larger weight because the disagreement rate partly depends on which two model types you chose. Use the score to rank images. It is not a probability.
 
 **Flag reasons:**
-- `RARE_ENRICHMENT` — a class that is <1% of the cohort, has ≥20 cells in this image, and is ≥3× enriched vs the baseline.
-- `COMPOSITION_OUTLIER` — composition robust z ≥ 3.
-- `HIGH_DISAGREEMENT` — disagreement robust z ≥ 3.
-
-**Why these numbers?** Most are standard statistical conventions, not arbitrary:
-- **Robust z ≥ 3** is the classic *3-sigma* outlier rule. The robust z uses `0.6745 × (value − median) / MAD`, where `0.6745` is the constant that makes MAD a consistent estimator of the standard deviation for normal data — so the score sits on the same scale as an ordinary z-score and "≥ 3" means the same thing it always does (~0.1% one-tailed under normality).
-- **Rare enrichment (<1%, ≥20 cells, ≥3×)** is an **AND gate**: a class must be rare cohort-wide *and* have enough cells to not be noise *and* be meaningfully concentrated here. The ≥20-cell floor stops a handful of misclassifications from faking a "3× enrichment"; <1% and 3× are round "rare" / "real, not jitter" conventions.
-- **Laplace smoothing** (add-one) keeps a class with zero cells in one image from blowing up the composition distance.
-- **0.65 / 0.35 weighting** is the one judgement call. Composition drift (a slide whose whole class makeup differs) is a more trustworthy "this slide is different" signal than raw disagreement rate, which is noisier and partly an artefact of *which two model types* you picked — so composition gets the heavier weight. The two weights are forced to sum to 1, so the score is a convex blend, not two independent dials. Treat the score as a **ranking aid**, not a calibrated probability.
+- `RARE_ENRICHMENT`: a class that is under 1% of all cells in the project has at least 20 cells in this image and is at least 3× more common here than in the whole project.
+- `COMPOSITION_OUTLIER`: composition z-score ≥ 3.
+- `HIGH_DISAGREEMENT`: disagreement z-score ≥ 3.
 
 **How to use it:**
-- Sort by Anomaly (default). Top rows = look at these first.
-- Flagged + high disagreement → the classifier doesn't understand this slide. **Open it, label 10–20 cells, re-train.**
-- Flagged + composition outlier but low disagreement → real biology that's atypical for the cohort, or staining drift / segmentation artefact. Visual check.
-- Rare enrichment → check whether the rare class is real (good, you've found something) or a per-slide artefact masquerading as it.
+- Sort by **Anomaly** (the default sort). Check the top rows first.
+- Flagged with high disagreement: the classifier performs poorly on this image. Open it, label 10–20 cells, and retrain.
+- Composition outlier with low disagreement: either a real biological difference, or a staining or segmentation problem. Check the image visually.
+- Rare enrichment: check whether the cells really are that class, or are a staining or segmentation artefact.
 
-> Robust z is noisy on tiny projects (< ~5 images). Don't overinterpret on small cohorts.
+> With fewer than 5 images, the z-scores are unreliable.
 
 ---
 
@@ -736,28 +688,26 @@ For each image:
 
 **Menu:** *Extensions → SP Classify → Intensity Heatmaps...*
 
-A phenotype × marker heatmap of **mean whole-cell intensity per predicted cell class** — the standard "mean marker expression per phenotype" view used to sanity-check that each class actually expresses the markers it should (e.g. CD8⁺ T-cells are high for CD8, Tregs high for FOXP3).
+Shows the mean whole-cell intensity of each marker for each cell class. Rows are classes and columns are markers (`<marker>: Cell: Mean` measurements). Use it to check that each class has high values for its expected markers, e.g. CD8 T cells high for CD8, Tregs high for FOXP3.
 
-Rows are cell classes (the `PathClass` assigned to each detection), columns are markers (every `"<marker>: Cell: Mean"` whole-cell measurement), and each cell is the mean intensity of that marker across all cells of that class.
-
-When you open the heatmap you first pick which whole-cell mean measurements to include:
+When the window opens, choose which whole-cell mean measurements to include:
 
 ![Select measurements for intensity heatmap](doc_images/select_measurements_for_intensity_heatmap.png)
 
-**Colour = z-score across phenotypes.** Each marker column is standardised across the class rows, so the colour highlights *which phenotype is relatively high (red) or low (blue)* for that marker, independent of the marker's absolute brightness. A diverging blue↔white↔red scale is used with a colorbar legend; grey means "no cells of that class had a valid value for that marker". The numeric mean can be overlaid in each cell via **Show mean values**.
+**Colour** shows each marker's z-score across classes: red means the class is higher than other classes for that marker, blue means lower. Colours compare classes within one marker, not brightness between markers. Grey means no cells of that class had a value for that marker. **Show mean values** (ticked by default) prints the mean in each square.
 
 ![Mean marker expression per phenotype heatmap](doc_images/marker_intensity_heatmap.png)
 
 **Image selector** (top of the window):
-- **The current image** (selected by default).
-- **Any other project image** — loads that image's saved data in the background and computes its heatmap on demand (results are cached after the first load).
-- **All Images (Project Combined)** — a project-wide heatmap computed from **true pooled means** (every cell across every image contributes equally), not an average of per-image averages.
+- **The open image** (selected by default).
+- **Any other project image**: its saved data is loaded and its heatmap calculated. While the window is open, the result is kept, so choosing the image again is immediate.
+- **All Images (Project Combined)**: one heatmap for the whole project. Each mean is calculated over all cells from all images, not as an average of the per-image means.
 
 **Buttons:**
-- **Export PNG** — saves the heatmap exactly as drawn (white background).
-- **Export CSV** — a `Class, CellCount, <marker>…` table of the underlying mean intensities (`NA` where a class had no valid value).
+- **Export as PNG…**: saves the heatmap as shown, on a white background.
+- **Export CSV…**: saves a `Class, CellCount, <marker>…` table of the mean intensities (`NA` where a class had no value).
 
-> The heatmap needs whole-cell mean intensity measurements (`"<marker>: Cell: Mean"`). If your detections don't have them, run QuPath cell detection / intensity measurement first. Classes come straight from the predictions in the viewer, so run a classifier (or apply gating) before opening the heatmap.
+> The heatmap needs `<marker>: Cell: Mean` measurements. If your cells do not have them, run *Analyze → Cell detection → Cell detection* in QuPath first. Classes are taken from the current cell classifications, so run a classifier or gating (§[11](#11-cell-scatter-plot--clustering--gating)) before opening the heatmap.
 
 ---
 
@@ -765,34 +715,33 @@ When you open the heatmap you first pick which whole-cell mean measurements to i
 
 **Menu:** *Extensions → SP Classify → Generate Distance Measurements...*
 
-A project-wide batch tool that adds spatial distance columns to your cell measurements — useful for downstream neighbourhood / spatial-statistics analysis. It runs across as many project images as you select, loading and saving each one for you.
+Adds distance measurements to each cell, for spatial analysis. It runs on the project images you select, and opens and saves each one for you.
 
-It can generate three independent measurement families (tick any combination):
+There are three types of measurement. All three are ticked by default.
 
-| Computation | What it writes per cell | Backed by |
-|---|---|---|
-| **Detection-to-annotation signed distances** | `Signed distance to annotation <class> <unit>` — negative inside the annotation, positive outside. | QuPath `DistanceTools.detectionToAnnotationDistancesSigned` |
-| **Cross-class centroid distances** | `Distance to detection <class> <unit>` — nearest centroid-to-centroid distance to a cell of every *other* class. | QuPath `DistanceTools.detectionCentroidDistances` |
-| **Same-class nearest-neighbour distances (excludes self)** | `Distance to other <class> <unit>` — distance to the nearest *other* cell of the **same** class. | The extension (spatially indexed; see below) |
+| Computation | What it writes per cell |
+|---|---|
+| **Detection-to-annotation signed distances** | `Signed distance to annotation <class> <unit>`: negative inside the annotation, positive outside. |
+| **Cross-class centroid distances** | `Distance to detection <class> <unit>`: distance from the cell's centre to the centre of the nearest cell of each other class. |
+| **Same-class nearest-neighbour distances (excludes self)** | `Distance to other <class> <unit>`: distance to the nearest other cell of the same class. |
 
-`<unit>` is `µm` when a pixel size is available (from calibration or the override below), otherwise `px`.
+`<unit>` is `µm` when a pixel size is available (from the image calibration or the **Pixel size:** field), otherwise `px`.
 
 ### Dialog options
 
-- **Images** — checklist of every project image, with **All** / **None** / **Current only** buttons. All are ticked by default.
-- **Pixel size (µm/pixel)** — optional. Pre-filled from the current image's calibration when available.
-  - Leave **blank** to use each image's own existing calibration.
-  - Enter a value to override calibration for *every* selected image so results come out in microns.
-  - **Persist this pixel size to each image's calibration on save** — when ticked, the override is written into each image's calibration metadata (so future measurements also use this scale). When unticked, the override is reverted after the run.
-- **Skip images where all selected measurements already exist** (default on) — before computing, the extension scans every cell. If all cells already carry every measurement the selected computations would produce, the image is skipped entirely (no recompute, no re-save). This makes interrupted runs cheap to resume. It is **all-or-nothing per image**: if even one selected measurement is missing, the whole image is recomputed, guaranteeing internally consistent results. Untick to force recomputation (e.g. after changing classes).
-- **Parallel image workers** (1–N cores) — how many images are processed at the same time.
-  - The heavy distance maths for a *single* image already spreads across all CPU cores, so raising this mostly overlaps disk load/save (I/O) with compute.
-  - **Many small images:** higher worker counts can speed up the batch.
-  - **A few very large images (hundreds of thousands of cells):** 1–2 workers is often fastest — each image then gets the full CPU and uses less memory.
+- **Images**: one checkbox per project image, all ticked by default. Buttons: **All** / **None** / **Current only**.
+- **Pixel size:** (µm/pixel), optional. Filled in from the open image's calibration when it has one.
+  - Leave it empty to use each image's own calibration.
+  - Enter a value to use it for every selected image, so results are in µm.
+  - **Persist this pixel size to each image's calibration on save** (off by default): saves the pixel size into each image's calibration, so later measurements also use it. When unticked, each image's original calibration is restored after the run.
+- **Skip images where all selected measurements already exist** (on by default): skips an image only if every cell already has every selected measurement. If any measurement is missing, the whole image is recalculated. Use this to resume an interrupted run. Untick it to recalculate everything, e.g. after changing classes.
+- **Parallel image workers:** how many images are processed at the same time. The range is 1 to the number of processors. The default is half the number of processors, up to 4. The calculation for each image already uses all processors, so more workers mainly let images load and save while others are calculated.
+  - Many images of about 10,000–20,000 cells: use more workers.
+  - Images of 500,000 cells or more: use 1–2 workers. This also uses less memory.
 
 ### Running it
 
-Click **Apply**. The log area streams per-image progress, e.g.:
+Click **Apply**. The log shows the progress of each image, e.g.:
 
 ```
 Starting on 41 image(s)…
@@ -804,388 +753,316 @@ Using 1 parallel image worker(s) (cores=14).
 [slide2.ome.tif] Saved.
 ```
 
-Classes with only a single cell are reported as `Skipping '<class>' (n=1)` for the same-class computation (a lone cell has no same-class neighbour). Each processed image is saved back to the project automatically. **Close** dismisses the dialog.
-
-> **Performance note.** For large numbers of small images (10-20K cells) use a higher number of workers, for large images (500k+ cells) use one or 2 workers.
+Classes with only one cell are skipped for the same-class measurement and logged as `Skipping '<class>' (n=1)`. Each processed image is saved to the project automatically. **Close** closes the dialog.
 
 ---
 
 ## 11. Cell scatter plot — clustering & gating
 
-**Extensions → SP Classify → Scatter Plots and Clustering...** opens an interactive
-2D scatter plot for **unsupervised exploration**: cells are clustered — by
-k-means or, optionally, graph-based Leiden clustering (§[11.6](#116-clustering-method-k-means-vs-leiden))
-— on their marker measurements and projected into a 2D embedding so you can see,
-label, and sub-cluster populations. This is independent of the trained
-classifier — it writes to QuPath classifications, not the extension's training labels.
+**Extensions → SP Classify → Scatter Plots and Clustering...** opens a scatter plot
+for unsupervised clustering. Cells are clustered on their marker measurements with
+k-means or Leiden (§[11.6](#116-clustering-method-k-means-vs-leiden)) and drawn on a
+2D PCA or UMAP plot. You can then name the clusters as QuPath classes. This does not
+use or change the trained classifier or its training labels.
 
-When you open it you first pick which measurements to embed (a *Select
-Measurements for Scatter Plot* dialog). The window then computes an initial
-embedding on a background thread.
+When the window opens, pick the measurements to use in the *Select Measurements for
+Scatter Plot* dialog. The window then loads the open image's cells (up to the
+**Sample:** cap, default 50,000) and shows *"… cell(s) loaded — click “Recompute” to
+cluster."* Click **Recompute** to cluster and draw the plot.
 
-> Clustering applies any **feature normalisation** you've configured
-> (§[4.2](#42-clustering-normalisation)) — this is clustering-only (the classifier uses raw
-> values) — then z-scores each marker over the active cells. The normalizer is captured
-> when the window opens; reopen the plot after changing it.
+> Clustering uses the normalisation set in **Clustering Normalisation**
+> (§[4.2](#42-clustering-normalisation)). The classifier always uses raw values. Each
+> marker is then z-scored over the cells being clustered. Set the normalisation before
+> you open this window: a plot keeps the normalisation it was built with, and
+> reopening it from the menu or clicking **New clustering session** does not update it.
 
 ### 11.1 Controls
 
 **Top row**
-- **Embedding** — `PCA` (fast, linear) or `UMAP` (slower, non-linear, separates
-  overlapping populations better). The embedding is **for visualisation only**;
-  k-means always clusters in the original marker space, not on the 2D coords.
-- **Full UMAP** (checkbox, UMAP only) — by default UMAP *plots* a 20,000-cell
-  sample for responsiveness (k-means still clusters **all** cells; the status bar
-  shows e.g. *"309,584 clustered · 19,432 plotted"*). Tick **Full UMAP** to embed
-  every cell instead — much slower and more memory-hungry on large images, but
-  nothing is left out of the plot. PCA always plots all cells.
-- **Method** — `k-means` (default) or `Leiden`. Choosing Leiden replaces
-  **Clusters (k)** with a **Resolution** control and a reproducibility toggle —
-  see §[11.6](#116-clustering-method-k-means-vs-leiden).
-- **Clusters (k)** — number of k-means clusters (2–50). The legend shrinks to
-  keep all clusters visible and clickable. *k-means only* — Leiden decides its
-  own cluster count from the resolution instead (§11.6).
-- **Recompute** — re-fit the selected clustering method + the embedding on the
-  current rows (the open image, or the project sample). It does **not**
-  re-sample — use **Images…** in project scope for that.
-- **Scope: Current image / Project** — a toggle. *Current image* (default)
-  clusters every cell of the open image with full viewer interaction. *Project*
-  fits **one** k-means on a sample pooled across images you choose and drives the
-  same interactive plot, so you can name and assign clusters across the whole
-  cohort — see §[11.5](#115-project-wide-clustering-across-images). Switching to
-  *Project* reveals an **Images…** button and a **Sample:** spinner.
-- **Re-sample** — draw a fresh random sample of cells at the current **Sample:**
-  cap and re-fit (project scope; in current-image scope it re-draws the plotted
-  subsample). Unlike **Recompute**, which re-fits on the *existing* rows.
-- **New clustering session** (next to Re-sample) — start over from scratch:
-  re-opens the *Select Measurements* dialog so you can pick a different marker
-  set or scope, then builds a fresh plot. You only need this to **change the
-  inputs** — the plot now **remembers its clustering between closing and
-  reopening** the window (reopen it from the menu and your clusters, scope and
-  fit are restored as they were, with no re-clustering), so *New clustering
-  session* is the deliberate way to discard that and begin again.
+- **Embedding** — `PCA` (fast) or `UMAP` (slower; often separates overlapping
+  populations better). The embedding only positions the points on the plot.
+  Clustering always uses the marker values, not the 2D coordinates.
+- **Full UMAP** (UMAP only) — by default UMAP plots a random 20,000 of the loaded
+  cells. All loaded cells are still clustered, and the status bar shows both counts,
+  e.g. *"50,000 clustered · 19,432 plotted"*. Tick **Full UMAP** to plot every loaded
+  cell. This is slower and uses more memory. PCA always plots every loaded cell.
+- **Method** — `k-means` (default) or `Leiden` (§[11.6](#116-clustering-method-k-means-vs-leiden)).
+- **Clusters (k)** — number of k-means clusters, 2–50, default 8. Shown only when
+  Method = k-means. Leiden uses **Resolution** instead.
+- **Sample multiple seeds** — runs the clustering 10 times from different starting
+  points with a fixed seed and keeps the best result. Repeated runs with the same
+  settings then give identical clusters. Applies to k-means and Leiden. When unticked,
+  one faster run is made, and cluster numbers (sometimes boundaries) can change
+  between runs.
+- **Reduce dims (PCA)** (on by default) and **PCA comps:** (2–500, default 50) —
+  when more than 50 measurements are selected, clustering runs on this number of
+  principal components instead of on every measurement. This stops a marker that has
+  many measurement columns (mean, median, nucleus, cytoplasm, etc.) from dominating
+  the result. With 50 or fewer measurements it has no effect. When PCA is used, the
+  status bar shows e.g. *"PCA: 240 → 50 comps, 87.3% variance"*. The heatmap in the
+  assignment dialog (§11.3) still shows the original marker values.
+- **Cluster all cells / Transfer from sample** — shown only when Method = Leiden and
+  Scope = Project (§[11.5](#115-project-wide-clustering-across-images)).
+- **Recompute** — runs the clustering and the embedding on the cells currently
+  loaded. It does not draw new cells (use **Re-sample** for that). In project scope,
+  if no sample has been drawn yet, Recompute draws one first and then clusters it.
 
-**Filter row (this is the gating row)**
-- **Annotation** — type a keyword to cluster only cells whose centroid falls
-  inside an annotation whose name (or classification) contains that text. Blank =
-  all cells. Same membership test as Review mode. *Current-image scope only* — it
-  is disabled in project scope, since annotations belong to one image's hierarchy.
-- **Within class** — restrict clustering to cells whose current QuPath
-  classification contains this text (pick from the dropdown or type). Works in
-  **both** scopes: in current-image scope it combines with the annotation filter;
-  in project scope it filters the pooled sample by each cell's carried class, and
-  the cohort **Assign** is then restricted to that class too (so a sub-clustering
-  only rewrites cells of that class).
-- **Cluster markers** — a checklist of the embedded markers, all ticked by
-  default. Untick markers to cluster on a focused panel (e.g. immune markers
-  only). Values are **re-standardised over the active subset** each run, so
-  sub-clustering scales to the subpopulation rather than the whole image. At
-  least 2 markers must be ticked.
+**Scope row**
+- **Scope: Current image / Project** — *Current image* (default) clusters cells from
+  the open image. If the image has more cells than the **Sample:** cap, a random
+  subset of that size is used, and the status bar shows *"Subsampled X of Y cell(s)"*.
+  *Project* clusters a sample pooled from several images and adds an **Images…**
+  button (§[11.5](#115-project-wide-clustering-across-images)).
+- **Images…** (project scope only) — choose which project images to sample. This
+  clears the plot and does not sample. Click **Re-sample** afterwards.
+- **Sample:** (1,000–5,000,000, default 50,000) — the maximum number of cells to
+  load. Applies in both scopes. Press Enter or click **Re-sample** to apply a new
+  value.
+- **Re-sample** — draws a new random set of cells up to the **Sample:** cap: from the
+  chosen images in project scope, or from the open image in current-image scope. It
+  does not cluster. Click **Recompute** afterwards.
+- **New clustering session** — reopens the *Select Measurements* dialog so you can
+  choose a different set of measurements, then starts a new plot. If you only close
+  the window and reopen it from the menu, the previous clusters, scope and settings
+  are restored without re-clustering (in current-image scope, only when the same
+  image is open).
+
+**Filter row (gating)**
+- **Annotation** — enter one or more comma-separated keywords (e.g. `Tumour, Stroma`).
+  Only cells whose centroid lies inside an annotation whose name or class contains a
+  keyword are clustered. Leave blank to use all cells. In current-image scope, press
+  Enter to re-run. In project scope each image is filtered by its own annotations
+  when the sample is drawn, so click **Re-sample** after changing the keywords.
+- **Within class** — cluster only cells whose current QuPath classification contains
+  this text (pick from the dropdown or type). Works in both scopes and combines with
+  the annotation filter. In project scope, **Assign Clusters…** then changes only
+  cells of that class, so a sub-clustering only reclassifies that population.
+- **Cluster markers** — a checklist of the selected measurements, all ticked by
+  default. Untick markers to cluster on a smaller panel (e.g. immune markers only).
+  Values are z-scored again over the cells being clustered on each run, so a
+  sub-clustering is scaled to that subpopulation, not to the whole image. Tick at
+  least 2 markers.
+
+**Colour cells in image row**
+- **By cluster** — colours every cell in the open image by its nearest cluster and
+  writes a numeric `Cluster` measurement. If **Within class** is set, only cells of
+  that class are coloured. It does not change the cell's
+  classification. The colouring is removed when the window closes. In project scope
+  the button reads **By cluster (all images)**: it writes `Cluster` to every cell in
+  every selected image and saves each image.
+- **By classification** — returns the viewer to QuPath's class colours.
 
 **Bottom row**
-- **Colour by** — `CLUSTER` (k-means or Leiden cluster id), `CLASS`
-  (current/predicted class), or `MARKER` (single-marker intensity gradient; pick
-  the marker alongside).
-- **Select: Box / Lasso** — drag on the plot to select those cells (in the viewer
-  in current-image scope; a plot-only highlight in project scope — see §11.2).
-- **Apply Clusters… / Assign Clusters…** — see §11.3. The button's label follows
-  the scope.
-- **Export PNG…** — save the current plot.
+- **Colour by** — `CLUSTER` (cluster number), `CLASS` (current class), or `MARKER`
+  (one marker's intensity; pick the marker in **Marker:**).
+- **Select: Box / Lasso** — drag on the plot to select those cells (§11.2).
+- **Apply Clusters… / Assign Clusters…** — name clusters as classes (§11.3). The
+  label is **Apply Clusters…** in current-image scope and **Assign Clusters…** in
+  project scope.
+- **Export PNG…** — saves the current plot as a PNG.
+
+> If the status bar shows *"(UMAP unavailable — showing PCA)"*, UMAP could not start
+> on this computer. Restart QuPath with the launch option
+> `--add-opens=java.base/java.lang=ALL-UNNAMED` to enable it.
 
 ### 11.2 Selecting cells
 
-- **Box / Lasso** drag selects the enclosed points.
-- **Click a cluster in the legend** (CLUSTER colour mode) selects **all** that
-  cluster's cells — the cursor turns to a hand over clickable legend rows.
+- Drag a **Box** or **Lasso** to select the enclosed points.
+- In `CLUSTER` colour mode, click a cluster in the legend to select all its cells.
 
-In **current-image scope** selection is two-way: drag/click selects the cells in
-the QuPath viewer, and selecting cells in the viewer outlines them on the plot.
+In **current-image scope**, selection works both ways: selecting points on the plot
+selects those cells in the QuPath viewer, and selecting cells in the viewer outlines
+them on the plot.
 
-In **project scope** the rows are pooled from images that aren't all open, so
-there is no live cell to select — drag/click instead **highlights** the points on
-the plot (handy to read a region's class or marker intensity). It does not change
-the viewer selection.
+In **project scope**, the sampled cells come from images that are not open, so
+selecting points only highlights them on the plot. Use this to read the class or
+marker intensity of a region. The viewer selection does not change.
 
 ### 11.3 Apply Clusters / Assign Clusters — assign classes to clusters
 
-The same dialog serves both scopes. It shows one row per non-empty cluster —
-colour swatch, cell count, a **per-cluster marker heatmap** (mean z-scored
-intensity: **red = high, blue = low** — the cluster's phenotype fingerprint, so
-you can name it from its high markers), and a dropdown to map the cluster to an
-existing class, a newly typed class, or **— skip —**.
+Both scopes use the same dialog. It shows one row per non-empty cluster with: a
+colour swatch, the cell count, a heatmap of the cluster's mean z-scored value for
+each marker (red = high, blue = low), and a dropdown. Use the high markers to decide
+the name. In the dropdown, pick an existing class, type a new class name, or choose
+**— skip —**.
 
-You can manage classes without leaving the dialog: **Manage Classes…** opens
-[Class Control](#43-create-classes--class-control) (add / delete / merge) and **Refresh classes**
-re-reads the updated class list into every dropdown. (The dropdowns are also
-editable — typing a new name creates that class on assign.)
+To edit classes without closing the dialog, click **Manage Classes…** to open
+[Class Control](#43-create-classes--class-control) (add, delete, merge), then click
+**Refresh classes** to reload the class list into every dropdown. A class name typed
+into a dropdown is created when you assign.
 
 ![Assigning classes to clusters](doc_images/assign_parent_clusters.png)
 
-- **Current-image scope (Apply Clusters…)** — after you confirm (a second dialog
-  shows the exact cell count), the chosen classes are written to those cells'
-  **classification** on a background thread. Skipped/unmapped cells are untouched.
-- **Project scope (Assign Clusters…)** — see §[11.5](#115-project-wide-clustering-across-images);
-  the mapping is streamed and saved across every selected image.
+- **Current-image scope (Apply Clusters…)** — a second dialog shows the number of
+  cells that will change. After you confirm, the chosen classes are written to those
+  cells. Skipped clusters are not changed. Only the loaded cells are classified (at
+  most the **Sample:** cap). To classify every cell in a large image, set **Sample:**
+  to at least the image's cell count and click **Re-sample**, then **Recompute**,
+  before applying.
+- **Project scope (Assign Clusters…)** — see §[11.5](#115-project-wide-clustering-across-images).
 
-Either way this replaces any existing class on the mapped cells; it does **not**
-touch the extension's ground-truth training labels.
+In both scopes, the new class replaces any existing class on the assigned cells. The
+extension's training labels are not changed.
 
 ### 11.4 Cluster-within-clusters (hierarchical gating)
 
-The filter row lets you gate, then re-cluster inside a gate — the standard
-two-level phenotyping workflow:
+Use the filter row to cluster inside one population (two-level phenotyping):
 
-1. Cluster all cells on all markers → **Apply Clusters** → assign the cardinal
-   classes (e.g. **Tumour / Immune / Other**).
-2. Set **Within class: Immune**, open **Cluster markers** and tick only the
-   immune markers (CD45, CD3d, CD8A, CD4, CD20, PD1, FOXP3) → **Recompute**.
-   Only immune cells re-cluster, on immune markers, re-standardised within the
-   immune subset.
-3. **Apply Clusters** again to name the sub-populations — type derived names like
+1. Cluster all cells on all markers → **Apply Clusters…** → assign the main classes
+   (e.g. **Tumour / Immune / Other**).
+2. Set **Within class: Immune**, open **Cluster markers** and tick only the immune
+   markers (CD45, CD3d, CD8A, CD4, CD20, PD1, FOXP3) → **Recompute**. Only immune
+   cells are clustered, on immune markers, z-scored within the immune cells.
+3. Click **Apply Clusters…** again to name the subpopulations. Type names in the form
    `Immune: CD8 T` (QuPath treats `Parent: Child` as a derived class).
 
 ![Sub-clustering within the Immune class](doc_images/immune_sub_cluster.png)
 
-Repeat to go deeper. The status bar reports the active scope and marker count,
-e.g. *"…12,840 cells in class "Immune" · 7/24 markers"*.
-
-> **Native libraries / `--add-opens`.** PCA and UMAP use native math libraries
-> (OpenBLAS / ARPACK via JavaCPP). The extension opens the required JVM module access
-> automatically at startup, so no launch flags are normally needed. If that ever
-> fails on a locked-down JVM, the plot falls back to PCA and the status bar
-> suggests launching QuPath with
-> `--add-opens=java.base/java.lang=ALL-UNNAMED`.
+Repeat for further levels. The status bar shows the active filter and marker count,
+e.g. *"(12,840 cells in class “Immune”) · 7/24 markers"*.
 
 ### 11.5 Project-wide clustering across images
 
-To cluster a **whole cohort consistently**, flip the **Scope** toggle to
-**Project**. The extension fits **one** model on a sample pooled across the
-images you choose, then (when you assign) maps *every* cell in *every* selected
-image to that same cohort clustering — so cluster 3 means the same phenotype in
-every image (unlike clustering each image separately, which gives non-comparable
-cluster ids). It all happens in the same window, so every tool — colour-by-marker,
-within-class gating, the cluster-marker subset, the centroid heatmap — is
-available for naming the cohort's clusters.
-**k-means** assigns by nearest cohort centroid; **Leiden** assigns by kNN label
-transfer against the labelled fitted sample — see §[11.6](#116-clustering-method-k-means-vs-leiden).
+Project scope fits one clustering on a sample of cells pooled from the images you
+choose, then applies it to every cell in those images. Cluster 3 then means the same
+population in every image. (If you cluster each image separately, the cluster numbers
+cannot be compared between images.) All controls in §11.1 work in project scope.
+Selection on the plot only highlights points (§11.2).
 
 **Entering project scope**
 
-1. Click **Project**. An image picker opens — choose which project images to
-   sample (defaults to all). Cancel to stay on the current image.
-2. The extension streams each image and pools a bounded random sample (the **Sample:**
-   spinner, default 50,000, drawn evenly per image), then fits k-means and draws
-   the plot. The status bar reads e.g. *"Project sample (8 images)"*.
+1. Click **Project**. Choose the images to sample (all are selected by default).
+   Click Cancel to stay on the current image.
+2. Click **Re-sample**. The extension reads each image and takes up to **Sample:** ÷
+   (number of images) random cells from each, up to 50,000 in total by default. The
+   status bar shows *"Sampled X cell(s) across N image(s)"*.
+3. Click **Recompute** to cluster the sample and draw the plot. (Clicking
+   **Recompute** straight after step 1 does steps 2 and 3 together.)
 
-The sample only bounds the **fit** — 50,000 cells is statistically ample to place
-stable centroids (more barely move them but cost time). **Every** cell is still
-classified later in the assignment pass, so memory stays flat regardless of
-project size.
+The sample is only used to fit the clusters. When you assign, every cell in every
+selected image is assigned, one image at a time, so the number of images does not
+limit memory use. Raising **Sample:** above 50,000 makes the fit slower.
 
 **Working with the cohort sample**
 
-The plot behaves like the single-image one, with the project caveats already
-noted: the Annotation filter is disabled (§11.1), and box/lasso/legend selection
-highlights on the plot only (§11.2). Everything else applies:
-
-- **Colour by → MARKER** to read which clusters are high in which marker.
-- **Within class** to sub-cluster one population across the cohort (the assign is
-  then restricted to that class — §11.1).
-- **Cluster markers** to fit on a focused panel.
-- **Recompute** re-fits on the existing sample (fast). To draw a fresh sample —
-  different images, or a new **Sample:** size — click **Images…**.
+- **Colour by → MARKER** shows which clusters are high in which marker.
+- **Within class** sub-clusters one population across all images. **Assign
+  Clusters…** then changes only cells of that class.
+- **Cluster markers** fits on a smaller panel.
+- **Recompute** clusters the current sample again. To use different images, click
+  **Images…** and then **Re-sample**. To change the sample size, change **Sample:**
+  and click **Re-sample**. Then click **Recompute**.
 
 **Assigning across the cohort**
 
-Click **Assign Clusters…**. The shared assignment dialog (§11.3) shows the
-per-cluster mean marker heatmap and a class dropdown per cluster. On confirm,
-The extension streams each selected image, assigns all matching cells to their cluster
-(nearest centroid for k-means; kNN label transfer against the fitted sample for
-Leiden — §[11.6](#116-clustering-method-k-means-vs-leiden)), writes the mapped
-classes, and **saves each image**, with progress in the status bar.
+Click **Assign Clusters…**. The dialog from §11.3 opens. After you confirm, each
+selected image is opened in turn, every matching cell is given its cluster's class,
+and the image is saved. Progress is shown in the status bar. (For how cells outside
+the sample are assigned, see §[11.6](#116-clustering-method-k-means-vs-leiden).)
 
-> **Measurement scaling & batch effects.** Clustering applies the extension's feature
-> normalisation (§[4.2](#42-clustering-normalisation)) — arcsinh / sqrt, a **clustering-only**
-> step (the classifier uses raw values) — then z-scores each marker over the active cells
-> at fit time. So if you've configured normalisation, it shapes the clusters and
-> the colour-by-marker view too. (The normalizer is captured when the window
-> opens; change it via *Clustering Normalisation* and reopen the plot to pick it up.)
+> **This changes every selected image.** Assigning replaces the class on the assigned
+> cells and saves each image. Training labels are not changed. The open image updates
+> immediately.
 
-**Leiden cohort modes: "Cluster all cells" vs "Transfer from sample"**
+> **Annotation filter.** In project scope the **Annotation** filter limits which
+> cells are sampled. With k-means, or Leiden **Transfer from sample**, **Assign
+> Clusters…** and **By cluster (all images)** assign every cell in each image that
+> passes **Within class**, including cells outside the matching annotations.
 
-When **Method = Leiden** and **Scope = Project**, a radio pair appears next to the
-Method selector (hidden for k-means, and hidden in current-image scope):
+> **Staining differences between images.** Normalisation is applied per marker, not
+> per image. If one slide is stained brighter than the others, its cells can fall
+> into different clusters. Check the per-image intensity distributions before
+> pooling.
 
-- **Cluster all cells** (default) — the exact, true-scanpy `sc.tl.leiden`-style
-  mode: **every** cell across every selected image is pooled into one feature
-  matrix, one approximate-NN (HNSW) kNN graph is built over the whole cohort, a
-  **single** CWTS Leiden partition runs over that entire graph, and each cell's
-  community label is written back to its source image by its stable cell UUID
-  (not by iteration order — safe even if a second read of an image returns cells
-  in a different order). This genuinely clusters every cell, rather than
-  approximating the rest of the cohort from a sample.
-- **Transfer from sample** — the fast/approximate mode retained from the previous
-  release: Leiden fits once on the pooled sample, then every other cell is
-  assigned by kNN label transfer against that labelled sample (`sc.tl.ingest`-style
-  — see §[11.6](#116-clustering-method-k-means-vs-leiden)).
+**Leiden in project scope: Cluster all cells / Transfer from sample**
 
-Clicking **Assign Clusters…** / **By cluster (all images)** with **Cluster all
-cells** selected runs the two-pass all-cells driver instead of the transfer path:
+With **Method = Leiden** and **Scope = Project**, two options appear next to
+**Method**:
 
-- **Soft cell-count ceiling.** Before pooling starts, the extension does a quick
-  count-only pass over the selected images to estimate the total pooled cell
-  count. If that estimate is above a configurable ceiling (50,000,000 cells by
-  default), an extra confirm dialog warns you before the run begins — it warns,
-  it does not hard-block.
-- **Per-phase progress.** The status bar reports each phase as it happens —
-  *"Pooling 12/40 images"* → *"Building kNN graph…"* → *"Running Leiden…"* →
-  *"Writing 12/40 images"* — followed by the run's outcome.
-- **ANN recall gate.** The HNSW graph build is checked at runtime against an
-  exact nearest-neighbour reference on a small sample; the status line reports
-  the measured recall (e.g. *"ANN recall 0.982 — passed"*) when the driver
-  exposes it. If recall cannot reach the required 95% after auto-tuning, the run
-  **aborts with no `Cluster` labels written at all** — an actionable error
-  explains why; existing `Cluster` measurements from a previous successful run
-  are left untouched.
-- **Cancel.** A **Cancel** button appears only during an all-cells run. Cancelling
-  stops the write pass before its next image — images already written keep their
-  `Cluster` measurement (no rollback); the final status line reports how many
-  images were, and were not, written.
-- **Legend re-sync.** After a successful (non-cancelled, non-aborted) all-cells
-  write, the scatter legend and the open image's overlay re-sync to the **final
-  all-cells cluster count** — the number Leiden actually found across the whole
-  cohort — not the interactive preview's (subsample-based) cluster count. The
-  interactive plot itself always stays subsample-based for responsiveness; only
-  the persisted `Cluster` measurement (and, after the write, the legend/overlay)
-  reflects the full all-cells run.
+- **Cluster all cells** (default) — clusters every cell in every selected image
+  together, not just the sample. This is slower and uses more memory.
+- **Transfer from sample** — clusters only the sample. Each other cell takes the most
+  common cluster among its 15 nearest cells in the sample. This is faster.
 
-Single-image Leiden (current-image scope, and the interactive project-scope
-preview fit) also builds its kNN graph through the same HNSW approximate-NN index
-now, rather than a brute-force scan — this is transparent (no extra control) and
-only matters if you happen to hit the same recall gate on a single image, in
-which case the status bar reports it and asks you to try more cells or different
-markers.
+With **Cluster all cells**, the full run is started by **By cluster (all images)**:
 
-> **Fidelity vs stock scanpy.** The extension's Leiden clustering (both cohort modes
-> and the single-image path) is a close, but not bit-identical, match to running
-> `sc.tl.leiden` in Python. Two remaining documented gaps (a third — PCA — is now
-> implemented, see below):
->
-> 1. **Quality function** — the bundled CWTS Leiden library optimises the
->    **Constant Potts Model (CPM)**, not scanpy's default **modularity**
->    (RBConfiguration). The `Resolution` control behaves like the familiar
->    scanpy/leidenalg knob (association-strength normalisation keeps it on the
->    same rough scale), but is not numerically identical to a modularity run.
-> 2. **Edge weighting** — the extension weights the kNN graph by **Jaccard
->    similarity of shared nearest neighbours (SNN)**, not scanpy's **UMAP
->    fuzzy-simplicial-set connectivities**.
->
-> Neither is expected to change population-level conclusions for multiplex-
-> imaging marker panels, but an external `sc.tl.leiden` run on the same data is
-> not guaranteed to reproduce identical cluster boundaries.
+1. Click **Recompute** to preview the clusters on the sample.
+2. Click **By cluster (all images)** and confirm. The extension:
+   - counts the cells first. If there are more than 50,000,000, it asks you to
+     confirm again;
+   - shows each step in the status bar: *Pooling 12/40 images → Building kNN graph… →
+     Running Leiden… → Writing 12/40 images*;
+   - writes a `Cluster` measurement to every cell and saves each image.
+     Classifications are not changed;
+   - shows a **Cancel** button. Cancelling stops before the next image. Images
+     already written keep their new `Cluster` values.
 
-> **PCA dimensionality reduction (scanpy `scale → PCA → neighbors` recipe).**
-> Both cohort modes and the single-image path apply a conditional PCA reduction
-> to the z-scored marker matrix *before* building the clustering kNN graph (both
-> k-means and Leiden) — a **"Reduce dims (PCA)"** checkbox (on by default) and a
-> components spinner (default 50) sit next to the Resolution/k controls. Below
-> ~50 active marker columns this is a no-op (a small, curated panel is already
-> low-dimensional — projecting onto ≥ p components is just a lossless rotation),
-> preserving the exact prior small-panel behaviour. Above that threshold — real
-> projects can carry hundreds to 1000+ per-cell measurements (each marker × mean/
-> median/percentile × nucleus/cytoplasm/membrane) — unreduced Euclidean kNN both
-> lets whichever marker happens to have the most measurement columns dominate
-> the distance, and suffers high-dimensional distance concentration; PCA fixes
-> both. The reduction uses the same exact (deterministic, non-randomized) Smile
-> `PCA` eigendecomposition already used for the 2D display embedding, so the
-> reproducible-seed clustering path stays bit-stable. Per-cluster centroids (the
-> Assign-dialog heatmap) and the interpretive marker view are always computed in
-> the **original marker space**, never the PCA space — only the neighbour graph
-> itself is built on the reduced matrix. On the all-cells cohort path, the PCA
-> projection is **fit on a bounded seeded subsample** (like the ANN recall gate's
-> sampling) when the pooled cohort is very large, then applied to every pooled
-> cell — bounding fit cost/memory independent of total cell count. When applied,
-> the status bar/log reports `PCA: {p} → {nComp} comps, {variance}% variance`.
+   When it finishes, the legend, the image colouring and the **Assign Clusters…**
+   dialog show the clusters found across all cells. The plot itself still shows the
+   sample.
+3. Click **Assign Clusters…** to name the clusters. Classes are assigned from the
+   written `Cluster` values.
 
-> **Citing.** Graph-based clustering here uses the **Leiden algorithm** (Traag,
-> Waltman & van Eck, *Sci. Rep.* 2019) and mirrors the **scanpy** scale → PCA →
-> neighbours → Leiden recipe (Wolf, Angerer & Theis, *Genome Biol.* 2018); the
-> scalable kNN graph uses **HNSW** (Malkov & Yashunin, *IEEE TPAMI* 2020). If
-> graph-based clustering is central to your analysis, please cite these — full
-> citations and the bundled-library licenses (CWTS `networkanalysis`, jelmerk
-> `hnswlib-core`) are in the [README acknowledgements](README.md#acknowledgements).
+If you click **Assign Clusters…** without step 2, or after a new **Recompute**, cells
+are assigned by transfer from the sample instead.
+
+If the neighbour search is not accurate enough (below 95% recall), the run stops and
+an error dialog says that no `Cluster` measurement was written. Existing `Cluster`
+values are kept. Try different markers or more cells. The same check runs for Leiden
+on a single image or a project sample: if the status bar shows *"Leiden preview: ANN
+recall too low — try more cells / different markers."*, no clusters were made.
+Increase **Sample:** or change the ticked **Cluster markers** and click **Recompute**.
+
+> **Comparison with scanpy.** Results are similar to `sc.tl.leiden` in Python but not
+> identical. This extension uses a different quality function (CPM rather than
+> modularity) and weights the neighbour graph by shared neighbours (Jaccard) rather
+> than UMAP connectivities. The same **Resolution** value can give slightly different
+> cluster boundaries in scanpy.
+
+> **Citing.** If graph-based clustering is central to your analysis, cite the
+> **Leiden algorithm** (Traag, Waltman & van Eck, *Sci. Rep.* 2019), **scanpy** (Wolf,
+> Angerer & Theis, *Genome Biol.* 2018), whose scale → PCA → neighbours → Leiden steps
+> this follows, and **HNSW** (Malkov & Yashunin, *IEEE TPAMI* 2020), used for the
+> neighbour graph. Full citations and the licences of the bundled libraries (CWTS
+> `networkanalysis`, jelmerk `hnswlib-core`) are in the
+> [README acknowledgements](README.md#acknowledgements).
 
 ### 11.6 Clustering method: k-means vs Leiden
 
-The **Method** selector (§11.1) switches the clustering algorithm; everything
-else in this section — the embedding, colouring, selection, within-class gating,
-cluster-marker subsetting, and cluster→class assignment — works identically for
-both, because both ultimately produce the same per-cell cluster label array.
+**Method** (§11.1) selects the clustering algorithm. All other controls work the same
+for both methods.
 
-- **k-means** (default) partitions cells into a **fixed** number of clusters (the
-  **Clusters (k)** spinner, 2–50). It assumes clusters are roughly spherical and
-  similarly sized, and you must pick `k` up front.
-- **Leiden** is graph-based community detection — the same family of algorithm
-  used by scanpy, scimap, and SPACEc for single-cell / multiplex-imaging
-  phenotyping (it traces back to PhenoGraph). Instead of a fixed `k`, the extension
-  builds a nearest-neighbour graph over the z-scored marker matrix, weights edges
-  by neighbourhood similarity (Jaccard), and runs the Leiden algorithm — the
-  **number of clusters is decided by the data**, not chosen in advance. This finds
-  non-spherical and unequal-size populations — including rare cell types — that
-  k-means tends to under-resolve or merge into a larger neighbour.
+- **k-means** (default) splits cells into exactly **k** clusters (**Clusters (k)**,
+  2–50, default 8). It works best when populations are of similar size.
+- **Leiden** links each cell to its 15 nearest cells (by marker values) and finds
+  groups of closely linked cells. You set **Resolution** instead of a cluster count,
+  and the number of clusters comes from the data. It is better than k-means at
+  keeping small or unevenly sized populations as separate clusters. This is the
+  method used by scanpy, scimap and SPACEc.
 
 ![Leiden clustering of cells in the scatter plot, coloured by community](doc_images/leiden_clustering.png)
 
 **Controls when Method = Leiden**
 
-- **Resolution** (0.1–3.0, default 1.0) — replaces **Clusters (k)**. Higher
-  resolution finds **more, smaller** communities; lower resolution finds **fewer,
-  larger** ones. There is no fixed cluster count to set — after **Recompute** the
-  status bar reports how many clusters Leiden found, e.g.
-  *"…· Leiden found 7 cluster(s)"*. If you want more (or fewer) populations,
-  raise (or lower) the resolution and **Recompute** again.
-- **Sample multiple seeds** (checkbox) — mirrors k-means' multi-restart
-  reproducibility: when ticked, Leiden runs several random-seeded passes and keeps
-  the best-quality partition, so repeated runs with the same settings return
-  identical clusters. Left unticked, Leiden runs a single faster pass whose exact
-  result may vary run to run (the same *populations* are still found — only which
-  integer id each gets can shift).
+- **Resolution** (0.1–3.0, default 1.0) — replaces **Clusters (k)**. Higher values
+  give more, smaller clusters; lower values give fewer, larger clusters. After
+  **Recompute** the status bar shows the number of clusters found, e.g.
+  *"7 cluster(s)"*. To get more or fewer clusters, raise or lower the resolution
+  and click **Recompute** again.
+- **Sample multiple seeds** — see §11.1. When ticked, Leiden runs 10 times with a
+  fixed seed (42) and keeps the best result. When unticked, cluster numbers, and
+  sometimes boundaries, can change between runs.
 
-The kNN graph-neighbour count and edge-weighting scheme are fixed, sensible
-defaults (not exposed as controls in this release) — see the design note in the
-repository for the full recipe and rationale.
+The neighbour count (15) and the edge weighting (shared-neighbour Jaccard) are fixed
+and cannot be changed in this version.
 
-**Cohort (project scope) assignment differs by method**
+**How cells outside the sample are assigned (project scope)**
 
-Leiden has no centroids to assign new cells to — averaging a non-spherical
-community into one point would defeat the method. So in **Project** scope
-(§11.5), Leiden fits once on the pooled sample exactly like k-means does, but the
-**assignment** pass differs:
-
-- **k-means** assigns each cell to its **nearest cohort centroid** (Euclidean, in
-  z-scored marker space).
-- **Leiden**, with **Transfer from sample** selected (§11.5), assigns each cell by
-  **kNN label transfer**: it finds that cell's nearest neighbours *within the
-  labelled fitted sample* and takes a majority vote of their Leiden labels — the
-  same approach scanpy uses (`sc.tl.ingest`) to map new cells onto an existing
-  clustering. Per-cluster mean marker profiles are still computed for the
-  assignment-pane heatmap either way — only the per-cell assignment mechanism
-  differs. With **Cluster all cells** selected instead, there is no separate
-  "assign" step at all — every cell is a first-class member of the single
-  cohort-wide Leiden partition (§11.5).
-
-Both methods otherwise share the exact same pipeline: the same z-scored active
-marker matrix, the same `cluster[]` label array driving plot colour/legend/box
-selection, and the same **Apply Clusters… / Assign Clusters…** dialog for naming
-populations.
-> Even so, per-marker normalisation does not fully correct **per-image** staining
-> differences, so when cells are pooled across a cohort, comparable staining still
-> matters: globally brighter slides can shift the pooled clusters. Normalise
-> upstream if intensity scales differ a lot, or interpret with that in mind.
-
-> **This writes classifications and saves every selected image.** It replaces the
-> existing class on assigned cells (the extension's training labels are untouched). The
-> currently-open image updates live; others are saved to disk.
+- **k-means:** each cell joins the cluster with the closest mean.
+- **Leiden, Transfer from sample:** each cell takes the most common cluster among its
+  15 nearest cells in the sample.
+- **Leiden, Cluster all cells:** all cells are clustered together, so no assignment
+  step is needed (§[11.5](#115-project-wide-clustering-across-images)).
 
 ---
 
@@ -1193,31 +1070,31 @@ populations.
 
 ### 12.1 Cell table export
 
-**Menu:** *Extensions → SP Classify → Export ▸ Cell Table...*
+**Menu:** *Extensions → SP Classify → Export → Cell Table...*
 
-For each selected image, writes `<ImageName>.csv` to your chosen folder with one row per detection:
+For each selected image, writes `<ImageName>.csv` to the folder you choose, with one row per detection:
 
 | Column | Notes |
 |---|---|
 | `Image` | Source image name |
 | `CellID` | QuPath cell UUID |
-| `CentroidX_um` / `CentroidY_um` | Centroid in microns, 2 decimals (falls back to pixel × calibration) |
-| `Area_um2` | Cell area in microns², 2 decimals |
-| `Classification` | Current `PathClass` (empty if unclassified) |
+| `CentroidX_um` / `CentroidY_um` | Centroid in microns, 2 decimals (pixel × calibration if no micron value) |
+| `Area_um2` | Cell area in µm², 2 decimals |
+| `Classification` | Current class (empty if unclassified) |
 | `ParentAnnotations` | All ancestor annotations, joined with `; ` |
-| `ContainingAnnotations` | Every annotation whose ROI geometrically contains the cell centroid (captures overlapping regions the hierarchy discards), joined with `; ` |
-| `Geometry_um` / `Geometry_px` | *(optional)* WKT `POLYGON` of the ROI outline, in microns or pixels — only written when polygon export is enabled |
-| feature columns | One column per measurement **or metadata field** you tick in the export dialog |
+| `ContainingAnnotations` | Every annotation whose outline contains the cell centroid, joined with `; `. Includes overlapping annotations that the hierarchy does not record as parents |
+| `Geometry_um` / `Geometry_px` | *(optional)* WKT `POLYGON` of the cell outline, in microns or pixels. Written only when **Export cell polygons (geometry)** is ticked |
+| feature columns | One column per measurement **or text field** you tick in the export dialog |
 
-Before exporting, a **Select Columns for Cell Table Export** dialog opens. It mirrors the *Select Features* dialog — search box, prefix dropdown, **Select Prefix** / **Clear Prefix**, **Select All** / **Clear All**, and a per-row checkbox — so you can pick exactly which columns land in the CSV. It pre-selects the curated subset (whole-cell means + any distance measurements). The chooser lists the **numeric measurements first, then the string metadata fields** (e.g. `CN Class`, `… original class`) — so text labels that aren't numeric measurements can now be exported too; filter for them by name if the list is long. Below the list, tick **Export cell polygons (geometry)** to include the ROI outline, and use the **Units** dropdown to choose **Microns (µm)** (`Geometry_um`) or **Pixels** (`Geometry_px`). Numeric measurements resolve to their value, metadata columns to their text value, and anything a cell doesn't have is written as `NA`.
+Before exporting, the **Select Columns for Cell Table Export** dialog opens. It works like *Select Features*: search box, prefix dropdown, **Select Prefix** / **Clear Prefix**, **Select All** / **Clear All**. The whole-cell mean measurements and any distance measurements are ticked by default. Numeric measurements are listed first, followed by text fields such as `CN Class`. To add cell outlines, tick **Export cell polygons (geometry)** and choose **Microns (µm)** or **Pixels** under **Units**. Any value a cell does not have is written as `NA`.
 
 ### 12.2 Ground truth export & import
 
-The extension's ground-truth files are a portable representation of your labelled cells **and** their feature vectors — they let you reuse labels across projects/workstations.
+Ground-truth files hold your labelled cells **and** their feature values, so you can reuse labels in other projects or on other computers.
 
 #### Export
 
-**Menu:** *Extensions → SP Classify → Export ▸ Ground Truth...*
+**Menu:** *Extensions → SP Classify → Export → Ground Truth...*
 
 Header (commented):
 ```
@@ -1227,22 +1104,22 @@ Header (commented):
 Image,Label,CentroidX,CentroidY,Feature1,Feature2,...
 ```
 
-Exports **raw** feature values only — the values the classifier trains/predicts on. (Earlier versions offered a normalised `__norm` column set; that was removed when normalisation became clustering-only.) Only labelled cells are exported.
+Exports raw feature values (the values the classifier uses) for labelled cells only.
 
-In multi-class mode the export pools labels from the current image plus all other project images. In **binary mode** use the dedicated menu item **Export ▸ Active Binary Ground Truth...** — it scopes to the active marker and includes previously-imported training rows from prior projects (so you can losslessly round-trip between projects).
+In multi-class mode the export includes labels from the current image and all other project images. In **binary mode** use **Export → Active Binary Ground Truth...** instead. It exports only the active marker and includes training rows imported from other projects, so the file can be moved between projects without losing rows.
 
 #### Import
 
-**Menu:** *Extensions → SP Classify → Import ▸ Ground Truth...*
+**Menu:** *Extensions → SP Classify → Import → Ground Truth...*
 
-After picking the CSV you choose one of two modes:
+After choosing the CSV, pick one of two modes:
 
-1. **Spatial Match** (per-image) — each imported row is matched to the nearest detection by centroid distance (you set the max threshold, default 20 px). Rows outside the threshold are skipped. Use this when you're re-importing labels onto the **same** image they were exported from.
-2. **Training Data Only** (cross-project) — imports the feature vectors + labels without mapping back to cells. Use this when the source image isn't open in the current project; the rows feed straight into the next training run as if they were locally-labelled cells. The sidebar shows the count as `Imported rows: N`.
+1. **Spatial Match** (per image) — each imported row is matched to the nearest detection by centroid distance, up to a maximum distance you set (default 20 px). Rows with no detection within that distance are skipped. Use this to re-import labels onto the **same** image they were exported from.
+2. **Training Data Only** (cross-project) — imports the feature values and labels without matching them to cells. Use this when the source image is not in the current project. The rows are used in the next training run in the same way as labels on cells. The sidebar shows the count as `Imported rows: N`.
 
-The binary equivalents are **Import ▸ Active Binary Ground Truth...** — same modes, but scoped to the active marker.
+For binary mode use **Import → Active Binary Ground Truth...**. It has the same two modes but applies only to the active marker.
 
-> **There is no "ground truth bundle" (ZIP)** currently — only the per-CSV import/export described here. The `.planning/phases/12` document scopes a bundle format as a future feature.
+> Ground truth can only be exported and imported as single CSV files. There is no ZIP bundle option.
 
 ---
 
@@ -1250,43 +1127,51 @@ The binary equivalents are **Import ▸ Active Binary Ground Truth...** — same
 
 *Extensions → SP Classify → **Utility Scripts***
 
-A grab-bag of common housekeeping operations that would otherwise live in one-off Groovy scripts. Each prompts for its parameters and reports what it did.
+Tools for common cleanup tasks. Each one asks for its settings, then reports what it changed.
 
 ### 13.1 Filter Cells by Size & Circularity
 
-Removes cell detections that are likely mis-segmented or artefacts. A dialog takes an optional **Min** and **Max** for both **Cell area (µm²)** and **Circularity** — leave any field blank for no bound. A cell is removed if it violates *any* active bound (e.g. `area > 500` **or** `circularity < 0.7`). Cells missing either measurement are skipped, not removed. The number of cells to be removed is shown for confirmation first; the operation acts on the **current image** only.
+Removes cell detections from the **current image** that fall outside size and shape limits. The dialog has **Min** and **Max** boxes for **Cell area (µm²)** and **Circularity (0–1)**. It opens with Max area = 500 and Min circularity = 0.7. Clear a box to remove that limit. A cell is removed if it breaks any limit (e.g. `area > 500` **or** `circularity < 0.7`). The tool uses the first measurement whose name contains "area" (or "circularity"). Check which one that is in your cell measurements: it may be a nucleus measurement rather than a whole-cell one. Cells missing either measurement are kept. The number of cells to be removed is shown before anything is deleted.
 
 ### 13.2 Resolve Hierarchy
 
-Rebuilds parent/child relationships from ROI containment — equivalent to the `resolveHierarchy()` scripting call. Choose **Current image** (resolves and refreshes immediately) or **All project images** (confirms first, then resolves and saves every entry). Project-wide work runs in the background so QuPath stays responsive; the open image updates straight away.
+Rebuilds parent/child relationships from object outlines, the same as the `resolveHierarchy()` script command. Choose **Current image** (applied immediately) or **All project images** (asks to confirm, then resolves and saves every image). The open image updates immediately; other images are processed in the background.
 
 ### 13.3 Delete Measurements by Keyword
 
-> ⚠️ **Destructive and not undoable.** Double-check the keyword against your actual measurement names — a loose keyword can delete more columns than you intend.
+> ⚠️ **Destructive and cannot be undone.** Check the keyword against your measurement names. A short keyword can match more columns than you intend.
 
-Removes every detection measurement whose name contains a keyword (case-insensitive by default; tick **Case sensitive** to match exactly). Choose **Current image** or **All project images**. Before deleting, the extension previews the exact list of matching columns and asks you to confirm — if nothing matches, it aborts. Project-wide saves each entry (open image first, the rest in the background).
+Removes every detection measurement whose name contains a keyword. Matching ignores case unless you tick **Case sensitive**. Choose **Current image** or **All project images**. Before deleting, the extension lists the matching columns and asks you to confirm. If nothing matches, nothing is deleted. With **All project images**, every image is saved (the open image first, the rest in the background).
 
 ### 13.4 Import GeoJSON Objects
 
-> ⚠️ **For small-to-medium GeoJSON only.** This importer loads the whole file into QuPath's memory, so very large files (hundreds of MB / millions of objects) can exhaust the heap and crash QuPath. For those, use the dedicated headless pipeline instead: [github.com/BioimageAnalysisCoreWEHI/import_large_geojson](https://github.com/BioimageAnalysisCoreWEHI/import_large_geojson).
+> ⚠️ **For small-to-medium GeoJSON files only.** This importer loads the whole file into QuPath's memory. Very large files (hundreds of MB or millions of objects) can run out of memory and crash QuPath. For those, use the headless pipeline: [github.com/BioimageAnalysisCoreWEHI/import_large_geojson](https://github.com/BioimageAnalysisCoreWEHI/import_large_geojson).
 
-Imports annotations and detections from a `.geojson` (or gzipped `.geojson.gz`) file into the **current image**. Pick the file, then choose whether to **clear existing objects first** and whether to **resolve the hierarchy** afterwards (off by default — it is O(n²) and slow for many objects). Parsing streams the file feature-by-feature on a background thread; objects are added annotations-first (locked), then detections, and the image data is saved automatically.
+**Menu:** *Utility Scripts → [TEST] Import GeoJSON Objects...*
+
+Imports annotations and detections from a `.geojson` or `.geojson.gz` file into the **current image**. Options (both off by default): **Clear existing objects first**, and **Resolve hierarchy after import**. The second can take a long time with many objects. Annotations are added and locked first, then detections, and the image is saved.
 
 ### 13.5 Export Annotation Regions
 
-> ⚠️ **Single-image, small-to-medium exports.** Pixels are streamed tile-by-tile so memory stays bounded, but very large regions or whole-project batch exports are far faster headless on HPC. For those, use the dedicated pipeline: [github.com/BioimageAnalysisCoreWEHI/export_large_annotation_regions](https://github.com/BioimageAnalysisCoreWEHI/export_large_annotation_regions).
+> ⚠️ **Single image, small-to-medium regions.** For very large regions or exports from a whole project, the headless pipeline on HPC is much faster: [github.com/BioimageAnalysisCoreWEHI/export_large_annotation_regions](https://github.com/BioimageAnalysisCoreWEHI/export_large_annotation_regions).
 
-Exports one or more annotation ROIs from the **current image** as polygon-**masked** OME-TIFFs — pixels outside the annotation shape are zeroed, so you get the annotation region rather than its rectangular bounding box. Enter a comma-separated list of annotation names (leave blank to export **all** annotations), set the **downsample**, **tile size**, **writer threads**, **compression** (LZW by default), and whether to write **BigTIFF** and a **pyramid**, then choose an output directory. Each region is written to `<image>__<annotation>.ome.tif` on a background thread, and a notification reports how many succeeded. Requires QuPath's built-in Bio-Formats extension (loaded by default).
+**Menu:** *Utility Scripts → [TEST] Export Annotation Regions...*
+
+Exports annotations from the **current image** as OME-TIFFs. Pixels outside each annotation's outline are set to 0. Enter annotation names separated by commas, or leave blank to export all annotations. Defaults: **Downsample** 1.0, **Tile size (px)** 512, **Writer threads** = number of CPU cores (maximum 32), **Compression** LZW, **BigTIFF** on, **Build pyramid** on. Each region is saved as `<image>__<annotation>.ome.tif` in the folder you choose, and a notification reports how many succeeded. Requires QuPath's Bio-Formats extension (included and loaded by default).
 
 ### 13.6 Reset Project State
 
-> ⚠️ **Destructive.** Permanently deletes everything the extension has saved for this project. Intended for starting over — e.g. when you've **copied a project** to trial different ML options and want a clean slate, since the `celltune/` state travels with the copy.
+> ⚠️ **Destructive.** Deletes everything the extension has saved for this project. Use it to start again, e.g. after **copying a project** to try different classifier settings: the `celltune/` folder is copied with the project.
 
-Deletes the project's entire `celltune/` folder: all labels and per-image label files, trained classifiers (multi-class **and** binary) and predictions, feature selection, normalisation, marker table, composite rules, and sampling/review state. It also resets the running session so nothing re-saves the old state.
+Deletes the project's `celltune/` folder: all labels and per-image label files, trained classifiers (multi-class **and** binary) and predictions, feature selection, normalisation, marker table, composite rules, and sampling/review state. It also resets the current session so the old state is not saved again.
 
-**Safety net:** before deleting anything, a timestamped **`celltune_backup_<timestamp>.zip`** is written to the project folder. To undo a reset, unzip it back into the project folder (recreating `celltune/`). The action is guarded by a typed **`RESET`** confirmation.
+**Backup:** before deleting, the extension writes `celltune_backup_<timestamp>.zip` to the project folder. To undo the reset, unzip it into the project folder. This recreates `celltune/`. To confirm the reset, type `RESET`.
 
-**Images and detections are kept.** The extension's ground-truth **label points** and the **cell classifications** (predictions) it paints onto cells live in each image's `.qpdata`, *not* in `celltune/`. They are left in place unless you tick **"Also clear SP Classify label points and all cell classifications from every image"**, which strips classified point annotations and clears every cell's classification across **all** project images (this rewrites each image's data and runs on a background thread). Tissue/region annotations and unclassified points are never touched.
+**Images and detections are kept.** The extension's ground-truth **label points** and the **cell classifications** (predictions) are stored in each image's `.qpdata`, not in `celltune/`, and are kept by default. To remove them too, tick **"Also clear SP Classify label points and all cell classifications from every image"**. This deletes classified point annotations and clears every cell's classification in **all** project images, and saves each image. Tissue/region annotations and unclassified points are never changed.
+
+### 13.7 Lock All Annotations
+
+Locks every annotation so it cannot be moved or edited by mistake. Choose **Current image** or **All project images** (asks to confirm, then saves every image). A notification reports how many annotations were locked.
 
 ---
 
@@ -1294,82 +1179,80 @@ Deletes the project's entire `celltune/` folder: all labels and per-image label 
 
 | Control | Default | What it does |
 |---|---|---|
-| **Rounds** | 500 | Maximum boosting rounds (50–1000). With Early stopping on this is a **limit**, not a target — models stop when they stop improving, so it usually costs nothing. With Early stopping **off** it is used literally; lower it. |
-| **Max depth** | 6 | Tree depth (2–15). Higher = more complex interactions, more overfit risk. |
-| **CPU threads** | 0 (all) | How many compute resources training may use. 0 = all of it. Lower it to keep working while training runs. Remembered between sessions. See §5.3. |
-| **Images at once** | 1 | How many images are classified at once *after* training (1–8). Uses memory, not processor. Doesn't affect training itself. |
-| **Model 1** | XGBoost | First ensemble model. |
-| **Model 2** | LightGBM | Second ensemble model. **Pick a different type** for meaningful disagreement. |
-| **Pool labels from all images** | ✅ | Train on labels from every image; auto-on/locked in binary mode. |
-| **Enable data balancing** | ✅ | Apply resampling. Hides the strategy dropdown when off. |
-| **Strategy** | SMOTE + Tomek | Resampling algorithm — see §5.4 table. |
-| **Auto-tune hyperparameters** | ❌ | Automatically searches for better settings by training **200 models**. Hours on a big panel — plan for overnight. |
-| **Early stopping** | ✅ | Stops training once the model stops improving, so you don't waste time. |
-| **Train/val metrics** | ✅ | Produces the **Training Metrics** report. Costs about a third of training time; untick it to train faster and go without the report. |
-| **Show top 10 feature importance after training** | ✅ | Auto-open SHAP plot after training. |
-| **Auto-prune features** | ✅ | Drop near-constant & redundant features across the pooled, normalised training set before training; the top 5 highest-variance features per group are always kept. Non-destructive. See §[4.1](#41-select-features). |
-| **Restrict to features shared with imported data** | ❌ | Case-insensitive intersection with imported ground-truth columns. |
-| **Sample current image only** | ❌ | Restrict sampling/review to the open image. |
-| **Filter by annotation keywords** | (blank) | Comma-separated substring filter on annotation names. |
-| **Apply to which images...** | (all) | Open dual-list selector. Button label updates with count. |
-| **Manual Label Mode** | — | Open floating labelling toolbar. |
-| **Train** | — | Start training. Requires ≥10 labelled cells. |
-| **Plot Confusion...** | (disabled) | Inter-model agreement matrix. Unlocks after training. |
-| **Training Metrics** | (disabled) | Per-class precision/recall/F1 on 20% held-out split (≥20 labelled cells). |
-| **Feature Importance...** | (disabled) | SHAP top-N per class. Unlocks after training. |
-| **Enter Review Mode** | (disabled) | Sample disagreement cells for human review. Unlocks after predictions exist. |
+| **Rounds** | 500 | Maximum boosting rounds (50–1000). With **Early stopping** ticked, training stops sooner when the model stops improving, so a high value costs little. With it unticked, every round is used; lower the value. |
+| **Max depth** | 6 | Maximum tree depth (2–15). Higher values model more complex marker combinations but overfit more easily. |
+| **CPU threads** | 0 (all) | Number of CPU threads training uses; 0 = all cores. Lower it to keep QuPath responsive during training. Remembered between sessions. See §5.3. |
+| **Images at once** | 1 | Number of images classified at the same time by **Apply to which images...** after training (1–8). Each image is loaded whole, so higher values use more memory. Does not affect training. |
+| **Model 1** | XGBoost | First model type. |
+| **Model 2** | LightGBM | Second model type. Use a different type from Model 1, so the two models disagree on uncertain cells. |
+| **Pool labels from all images** | ✅ | Train on labelled cells from every project image. Always on in binary mode. |
+| **Enable data balancing** | ✅ | Resample the training set to balance the classes. Untick to hide **Strategy**. |
+| **Strategy** | SMOTE + Tomek | Resampling method — see the §5.4 table. |
+| **Auto-tune hyperparameters** | ❌ | Searches for better model settings. Cost = 2 × Trials × CV folds model fits (200 at the defaults). This can take several hours on a panel with many features. |
+| **Trials** | 20 | Settings combinations tried per model (5–100). Shown only when Auto-tune is ticked. |
+| **CV folds** | 5 | Cross-validation folds used to score each combination (2–10). Shown only when Auto-tune is ticked. |
+| **Early stopping** | ✅ | Stops adding rounds when the score on held-out cells has not improved for 20 rounds. |
+| **Train/val metrics** | ✅ | Produces the **Training Metrics** report. Adds about a third to training time. Untick to train faster without the report. |
+| **Show top 10 feature importance after training** | ✅ | Opens the SHAP feature-importance plot after training. |
+| **Auto-prune features (drop near-constant & redundant)** | ✅ | Before training, removes features that are almost constant or highly correlated with another feature of the same marker. The 5 highest-variance features of each marker are always kept. Runs only when more than 20 features are selected. Image measurements are not changed. See §[4.1](#41-select-features). |
+| **Restrict to features shared with imported data** | ❌ | Train only on features that also exist in the imported ground-truth columns (names matched ignoring case). |
+| **Sample current image only** | ❌ | Sample and review cells from the open image only. |
+| **Filter by annotation keywords** | (blank) | Comma-separated keywords. Only cells inside annotations whose names contain a keyword (any case) are sampled for review. |
+| **Apply to which images...** | (all) | Choose the project images the trained classifier is applied to. The button label shows how many are selected. |
+| **Manual Label Mode** | — | Opens the floating labelling toolbar. |
+| **Train** | — | Starts training. Needs at least 10 labelled cells. |
+| **Agreement Confusion Matrix** | (disabled) | Shows how often the two models agree, per class. Available after training. |
+| **Training Metrics** | (disabled) | Per-class precision, recall and F1 on a 20% held-out split. Available after training with **Train/val metrics** ticked and at least 20 labelled cells. |
+| **Feature Importance...** | (disabled) | SHAP top features per class. Available after training. |
+| **Enter Review Mode** | (disabled) | Samples cells where the two models disagree, for you to review. Available once predictions exist. |
 
 ### 14.1 Reference: preferences
 
-Under **Edit → Preferences → SP Classify**. These are set once and left alone, which is why they aren't in the sidebar.
+Under **Edit → Preferences → SP Classify**.
 
 | Preference | Default | What it does |
 |---|---|---|
-| **Enable** | ✅ | Turn the extension off without uninstalling it. |
-| **XGBoost histogram bins** | 0 | **Leave at 0.** How many cut-off values the model tries per measurement; 0 = the standard 256, which is the most accurate. Lowering it trades accuracy for speed. |
+| **Enable SP Classify extension** | ✅ | Turns the extension off without uninstalling it. |
+| **XGBoost histogram bins** | 0 | Leave at 0. See below. |
+| **Use batch-corrected values** | ❌ | The same setting as **Use batch-corrected values in clustering + ML (streamed, no columns)** in the Batch Normalisation dialog. See §[19.4](#194-how-its-applied). |
 
-**XGBoost histogram bins — leave this alone.**
-
-**The default is the most accurate setting. Changing it trades accuracy for speed, and SP Classify is built on the assumption that you would rather wait and get the better answer.** The rest of this section is here so you know what the setting is if you meet it — not as a suggestion to change it.
-
-*What it is.* The classifier works by asking yes/no questions about one measurement at a time — *"is this cell's CD8 above 412?"* To find a good cut-off it has to try candidates. Trying every value in your data would be exact but painfully slow, so instead it sorts your cells by that measurement, chops them into buckets, and only tries the cut-offs *between* buckets. This setting is how many buckets. The standard 256 gives a possible cut-off at roughly every 0.4% of your cells, which is fine enough that you are unlikely to lose a real boundary.
-
-*What lowering it does.* Fewer buckets means fewer cut-offs to test, so training is faster — 128 is about twice as fast, 64 about two and a half times. But it also means fewer places the model is allowed to cut. If two cell types are separated by a narrow intensity window on some marker and that window falls inside a single bucket, the model can no longer split them there.
-
-*If you genuinely need the speed* — a very large panel, a deadline — then treat it as an experiment rather than a switch: train once at the default and export the cell table, then again at 128, and compare both the Training Metrics and the two exported class columns. Some cells **will** be classified differently. Only you can judge whether they are cells that matter. The training log header records the value used (`XGB max_bin: …`), so runs stay comparable afterwards.
+**XGBoost histogram bins.** Leave this at 0 (= 256 bins, the most accurate setting). Lower values make XGBoost training faster (128 about 2×, 64 about 2.5×) but change some predictions. To try a lower value, train once at 0 and once at 128, export the cell table each time, and compare the Training Metrics and the class columns. The training log records the value used as `XGB max_bin`.
 
 ---
 
 ## 15. Reference: every SP Classify menu item
 
-All under *Extensions → SP Classify*.
+All under *Extensions → SP Classify*, in menu order.
 
 | Item | Requires | Action |
 |---|---|---|
-| Binary Classifiers... | Project | Open the binary classifier manager (create/open/delete per-marker classifiers). |
-| Composite Classification... | Project + ≥1 trained binary | Apply trained binary classifiers and assign composite labels. |
-| Class Control... | Project | Add/Delete/Merge/Undo Merge classes. |
-| Channel Mapping (Review Display)... | Open image | Edit which image channels review shows for each class (per-project, with CSV import/export). See [§4.4](#44-channel-mapping-for-review-marker-table). |
-| Select Features... | Project | Pick which measurement columns are used for training. |
-| Clustering Normalisation | Project | Per-feature arcsinh/sqrt with shared cofactor (clustering-only; classifier uses raw). |
-| Batch Normalisation... | Project | UniFORM per-image marker-intensity alignment across a cohort; fit + QC, streamed into clustering + ML or written as `(batchnorm)` columns. See §[19](#19-batch-normalisation-uniform). |
-| Project Prediction Summary... | Project | Cohort QC, anomaly scoring, per-image flags. |
-| Image Pixel Prescreen... | Project | Cells-free whole-image QC: per-channel pixel statistics on a low-res pyramid level, cohort z-scores, verdicts/flags (background-heavy, saturated, weak signal, intensity outlier), CSV export. See §[17](#17-image-pixel-prescreen-whole-image-qc-no-cells-needed). |
-| Intensity Heatmaps... | Open image with detections | Phenotype × marker mean-intensity heatmap (z-score coloured), per-image / project-combined, PNG/CSV export. See §[9](#9-intensity-heatmaps). |
-| Generate Distance Measurements... | Project | Batch spatial distances (annotation-signed, cross-class, same-class NN) across selected images. See §[10](#10-distance-measurements-spatial-analysis). |
-| Scatter Plots and Clustering... | Open image with detections | Interactive PCA/UMAP embedding + k-means clustering, annotation/class gating, cluster→class assignment, and a **Scope** toggle for cohort-wide clustering across images in the same window. See §[11](#11-cell-scatter-plot--clustering--gating). |
-| Export ▸ Cell Table... | Open image with detections | One CSV per selected image. |
-| Export ▸ Ground Truth... | Open image with labels (multi-class) | Portable labels + feature vectors CSV. |
-| Export ▸ Active Binary Ground Truth... | Binary mode active + open image with labels | Same as above, scoped to active marker. |
-| Import ▸ Marker Table... | Open image | Load a cell-type → markers CSV for review channel switching (the Channel Mapping editor, [§4.4](#44-channel-mapping-for-review-marker-table), is the recommended way to edit it). |
-| Import ▸ Ground Truth... | Open image (multi-class) | Spatial-match or training-data-only mode. |
-| Import ▸ Active Binary Ground Truth... | Binary mode active + open image | Same as above, scoped to active marker. |
-| Utility Scripts ▸ Filter Cells by Size & Circularity... | Open image with cells | Remove cells outside optional area/circularity bounds (current image). See §[13.1](#131-filter-cells-by-size--circularity). |
-| Utility Scripts ▸ Resolve Hierarchy... | Open image or project | Rebuild parent/child relationships (`resolveHierarchy()`); current image or whole project. See §[13.2](#132-resolve-hierarchy). |
-| Utility Scripts ▸ Import GeoJSON Objects... | Open image | Import objects from a (gzipped) GeoJSON into the current image — **small-to-medium files only**. See §[13.4](#134-import-geojson-objects). |
-| Utility Scripts ▸ Export Annotation Regions... | Open image | Export annotation ROIs from the current image as polygon-masked OME-TIFF(s) — **single-image, small-to-medium**. See §[13.5](#135-export-annotation-regions). |
-| Utility Scripts ▸ Delete Measurements by Keyword... | Open image or project | **Destructive:** delete detection measurements matching a keyword, with preview/confirm. See §[13.3](#133-delete-measurements-by-keyword). |
-| Utility Scripts ▸ Reset Project State... | Project | **Destructive:** wipe the project's `celltune/` state (labels, models, predictions, settings) for a clean slate; writes a backup zip first, typed-`RESET` confirm, optional per-image artifact stripping. See §[13.6](#136-reset-project-state). |
+| Binary Classifiers... | Project | Opens the binary classifier manager: create, open or delete one classifier per marker. |
+| Composite Classification... | Project + ≥1 trained binary classifier | Applies trained binary classifiers and assigns composite labels. |
+| Class Control... | Project | Add, delete, merge and undo-merge classes. |
+| Channel Mapping (Review Display)... | Open image | Sets which image channels review shows for each class. Saved per project, with CSV import and export. See [§4.4](#44-channel-mapping-for-review-marker-table). |
+| Select Features... | Project | Choose which measurement columns are used for training. |
+| Clustering Normalisation | Project | Sets an arcsinh or square-root transform per feature, with a shared cofactor, for clustering only. The classifier uses raw values. See §[4.2](#42-clustering-normalisation). |
+| Project Prediction Summary... | Project | Cohort QC: anomaly score and flags for each image. See §[8](#8-project-prediction-summary). |
+| Intensity Heatmaps... | Open image with detections | Heatmap of mean marker intensity per class (z-score colours), for one image or the whole project. PNG and CSV export. See §[9](#9-intensity-heatmaps). |
+| Image Pixel Prescreen... | Project | Whole-image QC without cells: per-channel pixel statistics compared across the project, with flags for background-heavy, saturated, weak-signal and intensity-outlier images. CSV export. See §[17](#17-image-pixel-prescreen-whole-image-qc-no-cells-needed). |
+| Scatter Plots and Clustering... | Open image with detections | PCA/UMAP scatter plot with k-means or Leiden clustering, annotation and class gating, and cluster → class assignment. **Scope** switches to clustering across several images. See §[11](#11-cell-scatter-plot--clustering--gating). |
+| Cellular Neighborhoods... | Open image with cells in at least 2 classes | Groups cells by the cell types around them (k-means on neighbourhood composition), for one image or the whole project. See §[18](#18-cellular-neighborhoods-spatial-micro-environments). |
+| Batch Normalisation... | Project | Aligns each marker's intensity across images (UniFORM). Fit and QC, then use the corrected values in clustering and the classifier, or write them as `(batchnorm)` columns. See §[19](#19-batch-normalisation-uniform). |
+| Generate Distance Measurements... | Project | Distances to annotations (signed), to other classes, and to the nearest cell of the same class, for the selected images. See §[10](#10-distance-measurements-spatial-analysis). |
+| Export → Cell Table... | Open image with detections | One CSV per selected image. See §[12.1](#121-cell-table-export). |
+| Export → Ground Truth... | Open image with labels (multi-class) | CSV of labels and feature values that you can import into another project. |
+| Export → Active Binary Ground Truth... | Binary mode active + open image with labels | As above, for the active marker only. |
+| Import → Marker Table... | Open image | Loads a cell type → markers CSV used to switch channels during review. The Channel Mapping editor ([§4.4](#44-channel-mapping-for-review-marker-table)) is the recommended way to edit it. |
+| Import → Ground Truth... | Open image (multi-class) | Imports labels by spatial match, or as training data only. |
+| Import → Active Binary Ground Truth... | Binary mode active + open image | As above, for the active marker only. |
+| Utility Scripts → Filter Cells by Size & Circularity... | Open image with cells | Removes cells outside optional area and circularity limits, in the current image. See §[13.1](#131-filter-cells-by-size--circularity). |
+| Utility Scripts → Resolve Hierarchy... | Open image or project | Rebuilds parent/child relationships between objects, for the current image or the whole project. See §[13.2](#132-resolve-hierarchy). |
+| Utility Scripts → Lock All Annotations | Open image or project | Locks every annotation, in the current image or in all project images, so it cannot be moved or edited by accident. See §[13.7](#137-lock-all-annotations). |
+| Utility Scripts → [TEST] Import GeoJSON Objects... | Open image | Imports objects from a GeoJSON or gzipped GeoJSON file into the current image. Small to medium files only. See §[13.4](#134-import-geojson-objects). |
+| Utility Scripts → [TEST] Export Annotation Regions... | Open image | Exports annotation regions from the current image as polygon-masked OME-TIFF files. One image, small to medium regions only. See §[13.5](#135-export-annotation-regions). |
+| Utility Scripts → Delete Measurements by Keyword... | Open image or project | **Destructive:** deletes detection measurements whose names contain a keyword. Shows the matches and asks you to confirm. See §[13.3](#133-delete-measurements-by-keyword). |
+| Utility Scripts → Reset Project State... | Project | **Destructive:** deletes the project's `celltune/` folder (labels, models, predictions, settings). Writes a backup zip first and asks you to type `RESET`. Can also clear SP Classify label points and cell classifications from every image. See §[13.6](#136-reset-project-state). |
+| How to Cite... | Nothing (always available) | Shows the references to cite for SP Classify and for the methods you used. |
 
 ---
 
@@ -1379,17 +1262,18 @@ Everything the extension writes is under `<project>/celltune/`:
 
 ```
 celltune/
-├── classifier-state.json         # Multi-class model (features, classes, model bytes, labels, normalisation)
-├── composite-rules.json          # Saved CompositeClassificationRule objects (advanced/programmatic)
-├── marker-table.json             # Channel mapping for review (markers + exact channels, schema v2) — per project, persists across restarts
-├── binary-registry.json          # markerName → state file path
-├── labels_backup_YYYYMMDD_HHMMSS.json   # Auto-snapshot before each Train
+├── classifier-state.json         # Multi-class model (features, classes, models, labels, normalisation)
+├── composite-rules.json          # Saved composite classification rules
+├── marker-table.json             # Channel mapping for review (§4.4)
+├── binary-registry.json          # List of binary classifiers and their state files
+├── batch-shifts.json             # Batch normalisation fit (§19)
+├── labels_backup_YYYYMMDD_HHMMSS.json   # Copy of the labels, saved before each Train
 │
 ├── image-labels/                 # Multi-class labels, one JSON per image
 │   ├── slide1.json               #   { "<cellId>": "T-Cell", ... }
 │   └── ...
 │
-├── binary-image-labels/<marker>/ # Same per-image JSON, scoped per binary marker
+├── binary-image-labels/<marker>/ # Same per-image JSON, one folder per binary marker
 │   ├── CD3/slide1.json
 │   └── ...
 │
@@ -1399,129 +1283,100 @@ celltune/
 │   └── ...
 │
 ├── image-sampled/                # Cell IDs already sampled for review
-├── image-predictions/            # Per-image Pred_ALL — consumed by Project Prediction Summary
+├── image-predictions/            # Predictions for each image, used by Project Prediction Summary
+├── logs/                         # Training logs (last 20 kept)
 ```
 
-JSON throughout. Model bytes are Base64-encoded inside the state files. Safe to commit `celltune/` to git if you want shared review history.
+All files are JSON. You can put `celltune/` under version control (for example git) to share labels and review history.
 
 ---
 
-## 17. Image pixel prescreen (whole-image QC, no cells needed) - Experimental
+## 17. Image pixel prescreen (whole-image QC, no cells needed)
+
+> **Experimental.**
 
 **Menu:** *Extensions → SP Classify → Image Pixel Prescreen...*
 
-A **prescreen you run at the very start of a project** — before any segmentation or
-classification exists. It reads a low-resolution version of every image straight
-off the pyramid and summarises each one by its raw pixel intensities, then ranks
-and flags images against the cohort. Use it to spot slides that are mostly
-background, over-exposed, weakly stained, or otherwise unusual, so you can fix or
-exclude them before investing in analysis. It is useful to identify images which will 
-need additional attention and labelling during cell classification. It is the pixel-level twin of the
-[Project Prediction Summary](#8-project-prediction-summary) (which needs cells);
-this one needs none.
+Run this at the start of a project, before segmentation. It reads a low-resolution copy of every image, measures pixel intensities for each channel, and flags images that differ from the rest of the project: mostly background, saturated, weakly stained, or unusually bright or dim. Use it to decide which images to fix, exclude, or label more heavily later. It does not need cells. The [Project Prediction Summary](#8-project-prediction-summary) does a similar check after classification.
 
 ![Image pixel prescreen](doc_images/pixel_prescreen.png)
 
 ### How it works
 
-1. For each project image, the extension reads the **nearest pyramid level whose long
-   edge is ≈ 2048 px** (requested downsample = `longEdge / 2048`). Reading every
-   image to the same pixel footprint keeps the cohort statistics comparable
-   like-for-like, regardless of each slide's native size or pyramid structure.
-   Images are **read in parallel** (a small fixed thread pool) so large projects
-   scan several-fold faster.
-2. Channels are **aligned across images by name**.
-3. Per-channel statistics are computed (below), including a per-channel **focus**
-   (Laplacian variance) sharpness proxy.
-4. The image-level summaries and each **signal-bearing** channel's brightness
-   (`p99`) are converted to **robust z-scores** (`0.6745 × (value − median) / MAD`)
-   **across the cohort** — the same robust machinery as §8.
-5. Deterministic threshold rules assign each image a **verdict**, a set of
-   **flags**, and a plain-English **review**.
+1. Each image is read at the pyramid level closest to 2048 px on its long edge, so every image is compared at the same size. Up to 4 images are read at once.
+2. Channels are matched across images by name.
+3. Statistics are calculated for each channel (table below), including a sharpness measure (**focus**).
+4. The image-level values, and the `p99` brightness of each channel that has signal, are converted to robust z-scores across the project: `0.6745 × (value − project median) / MAD`. This is the same method as §8.
+5. Fixed threshold rules give each image a **verdict**, zero or more **flags**, and a written **review**.
 
 ### What each statistic means
 
-Per channel, over all pixels of the low-resolution image (values sorted ascending
-where percentiles are involved):
+Per channel, over all pixels of the low-resolution image:
 
-| Statistic | Definition | What it tells you |
-|---|---|---|
-| **median** | 50th percentile | Robust brightness; the main sort/comparison value (mean's outlier-resistant cousin). |
-| **mean** | `Σx / N` | Brightness including the tails; sensitive to hot pixels by design. |
-| **std** | population standard deviation | Spread of intensities. |
-| **min / max** | extrema | `max` is shown but **not** used for flagging — one hot pixel moves it. |
-| **p1 / p99** | 1st / 99th percentiles | `p1` = noise floor, `p99` = true signal ceiling; both ignore single extreme pixels. |
-| **saturation fraction** | fraction of pixels ≥ `0.999 × dtypeMax` | Clipping / over-exposure. `n/a` for floating-point images (no fixed max). Uses the **storage bit depth** (e.g. 255 for 8-bit, 65535 for 16-bit). |
-| **Otsu threshold** | foreground/background split from the channel histogram | The cutoff used for the next two rows. |
-| **background fraction** | fraction below the Otsu threshold | How much of the channel is background. |
-| **foreground coverage** | `1 − background fraction` | How much real signal — the direct **"lots of background"** measure. |
-| **dynamic range** | `p99 − p1` | Flat / weak / empty channels score near zero. |
-| **Laplacian variance (focus)** | variance of the discrete Laplacian over the image | No-reference sharpness proxy (higher = sharper). Intensity-scale dependent, so best read within a cohort. |
+| Statistic | What it tells you |
+|---|---|
+| **median** | Middle pixel value. Used for sorting and comparison because single bright pixels do not change it. |
+| **mean** | Average pixel value. Single very bright pixels raise it. |
+| **std** | Standard deviation: the spread of pixel values. |
+| **min / max** | Lowest and highest pixel value. `max` is shown but not used for flags, because one bright pixel sets it. |
+| **p1 / p99** | 1st and 99th percentiles. `p1` is the background level and `p99` the signal level. Single extreme pixels do not change them. |
+| **saturation fraction** | Fraction of pixels at or above 99.9% of the highest value the file can store (255 for 8-bit, 65535 for 16-bit). Measures clipping (over-exposure). `n/a` for floating-point images. |
+| **Otsu threshold** | Automatic cut-off between background and foreground, calculated from the channel histogram. Used by the next two rows. |
+| **background fraction** | Fraction of pixels below the Otsu threshold. |
+| **foreground coverage** | 1 − background fraction: how much of the channel is signal. Low values mean a lot of background. |
+| **dynamic range** | `p99 − p1`. Close to zero for flat, weak or empty channels. |
+| **Laplacian variance (focus)** | Sharpness measure (higher = sharper). It also depends on brightness, so compare it only within a project. |
 
-Image-level (derived across channels):
+Image-level (calculated across channels):
 
-| Statistic | Definition | What it tells you |
-|---|---|---|
-| **empty fraction** | fraction of pixels below the Otsu threshold in **every** channel | The single best "this slide is mostly glass/background" indicator. |
-| **focus** | **max** per-channel Laplacian variance (the sharpest channel) | Sharpness proxy. **Surfaced for inspection only — never flagged**, because it tracks overall brightness as much as true focus (a dim-but-fine slide reads as low focus). The max ignores near-dead channels, which sit near zero. |
-| **intensity z** | largest **signal-bearing** channel `p99` (brightness) robust-z vs the cohort | Drives the **intensity-outlier** flag — surfaces slides whose brightness profile diverges from the cohort (a likely ML challenge). Only channels with real signal contribute, so near-empty markers can't trigger it. |
+| Statistic | What it tells you |
+|---|---|
+| **empty fraction** | Fraction of pixels below the Otsu threshold in **every** channel. The best measure of how much of the slide is glass or background. |
+| **focus** | The highest per-channel focus value (the sharpest channel). Shown only; it never flags an image, because it changes with brightness as well as sharpness. |
+| **intensity z** | The largest `p99` z-score among channels with signal. Sets the `INTENSITY_OUTLIER` flag. |
 
 ### Verdicts, flags, and the score
 
-Each image gets one **verdict** and zero or more **flags** (default thresholds, all
-z-scores robust/MAD-scaled):
+Each image gets one **verdict** and zero or more **flags**. Default thresholds (z = robust z-score):
 
-| Verdict / flag | Fires when |
+| Verdict / flag | Set when |
 |---|---|
 | `BACKGROUND_HEAVY` | mean foreground-coverage z ≤ −2.5, **or** empty-fraction z ≥ 2.5 |
-| `SATURATED` | max saturation fraction ≥ 1% **and** its z ≥ 3.0 (cohort-relative), **or** ≥ 5% in absolute terms (clipping that severe is a defect on its own) |
+| `SATURATED` | highest channel saturation fraction ≥ 1% **and** its z ≥ 3.0, **or** saturation fraction ≥ 5% whatever the other images show |
 | `WEAK_SIGNAL` | median dynamic-range z ≤ −2.5 |
-| `INTENSITY_OUTLIER` | a **signal-bearing** channel's `p99` (brightness) z magnitude ≥ 2.5 (bright **or** dim) |
+| `INTENSITY_OUTLIER` | the `p99` z of a channel with signal is ≥ 2.5 or ≤ −2.5 (brighter or dimmer than the project) |
 | `OK` | none of the above |
 
-> **Why signal-gated?** Intensity-outlier detection runs only on channels whose
-> cohort-median foreground coverage clears a small floor (~5%). Near-dead markers
-> (whose `p99` hovers at the noise floor) are excluded, so their meaningless
-> relative jitter can't manufacture false "outlier" flags. **Focus is computed and
-> shown but never flags** — see the image-level table above.
+> Only channels with a median foreground coverage of at least 5% across the project are checked for intensity outliers. Channels with almost no signal are skipped, so they cannot produce false flags. Focus is shown but never flags an image.
 
-The **Score** is the sum of the positive deviations that drive those flags — higher
-means more unusual versus the project baseline. The table is sorted by Score by
-default.
+The **Score** is the sum of the positive deviations behind the flags. A higher Score means the image is more unusual for the project. The table is sorted by Score by default.
 
-**Table columns:** Image, Verdict, Score, Foreground %, Empty %, Max sat %,
-Dyn. range, Focus, Intensity z, Flagged. **Filter:** *Flagged only*.
+**Table columns:** Image, Verdict, Score, Foreground %, Empty %, Max sat %, Dyn. range, Focus, Intensity z, Flagged. Tick **Flagged only** to hide unflagged images.
 
-**Review pane** (below the table) for the selected image gives the plain-English
-context, e.g.:
+The **review pane** below the table explains the result for the selected image, for example:
 
 > TRMhi_284_4 — Intensity outlier
 > • Ly6G_S8 - Cy5_AF brightness (p99) 1246.00 is brighter than the cohort (median 220.00, +11.2 MAD).
 > Suggested action: review / normalize — intensity differs from the cohort (may challenge ML).
 
-…followed by a per-channel breakdown (median | p99 | foreground% | dyn.range | sat% | focus).
+This is followed by a table for each channel (median | p99 | foreground% | dyn.range | sat% | focus).
 
-**Buttons:** *Open Selected Image* (jumps QuPath there without saving the current
-one), *Export CSV* (wide layout — image-level columns including `MaxFocus`,
-`MaxFocusZ`, `MaxIntensityZ`, `MaxIntensityChannel`, plus a block of per-channel
-columns — including `LaplacianVariance` — for every channel in the cohort), *Close*.
+**Buttons:**
+- **Open Selected Image** opens the image without saving the current one.
+- **Export CSV** writes one row per image: image-level columns (including `MaxFocus`, `MaxFocusZ`, `MaxIntensityZ`, `MaxIntensityChannel`), then a block of columns for each channel (including `LaplacianVariance`).
+- **Close**.
 
 ### How to read it
 
-- **Sort by Score** (default). Look at the top rows first.
-- **Background-heavy** → mostly glass/empty. Exclude, re-acquire, or crop to the tissue.
-- **Saturated** → a channel is clipped. Fix exposure or drop it from intensity-based analyses.
-- **Weak signal** → flat, low-contrast image. Staining or exposure problem.
-- **Intensity outlier** → a signal-bearing channel is far brighter/dimmer than its peers. The review pane names the channel. These slides diverge from the cohort and may **challenge ML** (consider per-slide normalisation, or extra review). Check the staining batch or acquisition settings.
-- **Focus** (column / per-channel) → a sharpness proxy you can **sort on** to spot blur, but it is not a verdict — low focus often just means a dim slide.
-- **OK** → pixel statistics are within the normal range for the project.
+- **Sort by Score** (the default) and check the top rows first.
+- **Background-heavy**: mostly glass or empty. Exclude the image, re-acquire it, or crop it to the tissue.
+- **Saturated**: a channel is clipped. Fix the exposure, or leave that channel out of intensity-based analyses.
+- **Weak signal**: a flat, low-contrast image. Check the staining or exposure.
+- **Intensity outlier**: a channel with signal is much brighter or dimmer than in the other images. The review pane names the channel. The classifier may find these images harder. Consider batch normalisation (§19) or extra labelling, and check the staining batch and acquisition settings.
+- **Focus** (column and per channel): sort on it to find blurred images. It is not a verdict; low focus often means only that the image is dim.
+- **OK**: pixel statistics are within the normal range for the project.
 
-> **Caveats.** Robust z is noisy on tiny projects (< ~5 images) — don't
-> overinterpret. Saturation uses the storage bit depth, so a 12-bit image stored
-> as 16-bit reports against 65535. Floating-point images report saturation as
-> `n/a`. One downsampled image (all channels) is held in memory at a time; for
-> very highly multiplexed panels this can be large — the 2048 px target is the
-> place to dial it down if needed.
+> **Caveats.** With fewer than about 5 images, the z-scores are unreliable. Saturation is measured against the storage bit depth, so a 12-bit image stored as 16-bit is compared with 65535. Floating-point images show saturation as `n/a`. Up to 4 images are read at once, each at about 2048 px on the long edge with all channels, so panels with many channels need more memory. This size cannot be changed in the dialog.
 
 ---
 
@@ -1529,195 +1384,185 @@ columns — including `LaplacianVariance` — for every channel in the cohort), 
 
 **Menu:** *Extensions → SP Classify → Cellular Neighborhoods...*
 
-Cellular neighborhoods (CNs) group cells not by *what they are* but by *what surrounds them*. Instead of a cell's own phenotype, each cell is described by the **cell-type mixture of its local spatial window**, and those mixture vectors are clustered so the tissue is partitioned into recurring micro-environments — tumour core, tumour–stroma interface, immune niches, and so on. This is the Schürch/Nolan method — Schürch et al., "Coordinated Cellular Neighborhoods Orchestrate Antitumoral Immunity at the Colorectal Cancer Invasive Front," *Cell* 2020 ([full citation & acknowledgement in the README](README.md#acknowledgements)). If you use this feature, please cite that paper.
+Cellular neighborhoods (CNs) group cells by the cell types around them, not by their own type. Each cell is described by the mix of cell types in its local window. These mixes are clustered into recurring micro-environments, such as tumour core, tumour–stroma interface or immune niches. This is the method of Schürch et al., "Coordinated Cellular Neighborhoods Orchestrate Antitumoral Immunity at the Colorectal Cancer Invasive Front," *Cell* 2020 ([full citation & acknowledgement in the README](README.md#acknowledgements)). If you use this feature, please cite that paper.
 
-**The purpose of the clustering.** A per-cell phenotype tells you *what a cell is*; it says nothing about *where it sits*. Two CD8 T cells with identical marker profiles behave very differently if one is buried in tumour and the other is in an organised immune aggregate at the invasive margin. CN clustering recovers that spatial context automatically: rather than you hand-drawing "tumour", "stroma" and "interface" regions, k-means discovers the handful of recurring tissue states directly from the local cell-type composition, then labels **every** cell with the state it lives in. The output is both a **map** (regions you can see and overlay in the viewer) and a **per-image number** (what fraction of each patient's tissue is each state) that you can carry into cohort statistics.
+Use this when cells of the same type behave differently depending on where they are, for example CD8 T cells inside tumour compared with CD8 T cells at the invasive margin. Instead of drawing tumour, stroma and interface regions by hand, k-means finds recurring neighbourhood compositions and labels every cell with one. You get a map in the viewer and a `CN` value on every cell, from which you can calculate the fraction of each image in each CN and compare across the cohort.
 
-It is fully **non-destructive**: the CN id is written as a numeric `CN` measurement (and, once you name them, a `CN Class` text label in each cell's metadata plus a numeric `CN Class code`), never as a QuPath classification, so your trained phenotypes (`getPathClass()`) are untouched. Requires cells that already carry classifications (run the classifier first, or import them).
+Results are written as new measurements (see §18.5). Cell classifications are not changed. You need cells that already have classifications, either from running the classifier or from an import.
 
 ### 18.1 When to use it
 
-- You want to find **tissue architecture** (tumour vs stroma vs interface) or **immune micro-environments** (an activated-CD8 niche, a Treg pocket) that a per-cell phenotype can't express.
-- You want a **per-image feature** that is comparable across a cohort — e.g. "what fraction of each patient's tissue is the activated-CD8 niche" — for downstream group comparisons.
+- You want to find **tissue architecture** (tumour, stroma, interface) or **immune micro-environments** (an activated-CD8 niche, a Treg-rich area) that a per-cell phenotype does not show.
+- You want a **per-image value** that you can compare across a cohort, for example "the fraction of each patient's tissue in the activated-CD8 niche", for group comparisons.
 
 ### 18.2 How the clusters are computed
 
-The pipeline is the same four steps whether you run one image or the whole project:
+The same four steps run for one image or the whole project:
 
-1. **Neighbour window** — for every cell, find its local spatial neighbourhood, in one of three modes:
-   - **k nearest neighbours** — each cell's neighbourhood is built from its closest *other* cells of *any* type (Euclidean on centroids). The **window (cells)** spinner sets the **total window size**: with **Include centre cell** on the window is the centre cell plus its nearest neighbours; with it off it is that many nearest neighbours. The **default of 10 matches the paper** — a 10-cell window (Schürch et al. use the 10 nearest neighbours *including the cell itself*). *(The spinner counts total cells; internally the centre is one of them, so a window of 10 with the centre included finds 9 neighbours.)*
-   - **within radius** — every cell within a fixed radius (in µm when calibrated, else px).
-   - **Delaunay triangulation** — neighbours are the cells joined to it by an edge of the Delaunay triangulation, so the window adapts to local density (denser regions → tighter windows) with no *k* or radius to pick. Long edges are pruned so sparse/border cells aren't linked across empty tissue: choose **max edge** for a fixed cutoff (default `50` µm — cell centroids are typically 10–30 µm apart, so this keeps immediate neighbours and clips cross-void links) or **auto (Q3+1.5·IQR)** to cut each image at the Tukey upper whisker of its own edge-length distribution (adapts per image across a mixed-density cohort — the convention used by Giotto's Delaunay network). A cell whose every Delaunay edge is pruned gets an empty window (`CN = -1`), just like a too-small radius.
+1. **Neighbour window**: for every cell, find the cells around it, using one of three modes. A cell is never counted as its own neighbour; **Include centre cell in its own window** adds it back (step 2).
+   - **k nearest neighbours**: the window is a fixed number of cells (**window (cells)**, default 10, range 2–100). With **Include centre cell in its own window** ticked, a window of 10 is the cell itself plus its 9 nearest neighbours, as in Schürch et al. With it unticked, it is the 10 nearest neighbours.
+   - **within radius**: every cell within a set distance (default 50, range 5–500; µm if the image is calibrated, otherwise pixels).
+   - **Delaunay triangulation**: neighbours are the cells directly connected to it in a triangulation, so the window size follows local cell density. Long connections across empty space are removed. Choose **max edge** for a fixed limit (default 50, range 1–2000; µm if calibrated, otherwise pixels) or **auto (Q3+1.5·IQR)** to set the limit separately for each image from its own connection lengths. A cell with no remaining connections gets `CN = -1`.
 
-   All three use a spatially-indexed search (JTS `STRtree` for kNN/radius, JTS `DelaunayTriangulationBuilder` for Delaunay), so it scales to hundreds of thousands of cells per image. A cell's own coordinates are excluded from its neighbour list (the centre is added back separately by the option below).
+2. **Composition vector**: each window becomes a list of cell-type fractions (the proportion of Tumour, CD4 T, Treg, … in the window), using only the cell types you tick. With **Include centre cell in its own window** ticked (the default, as in the paper), the cell's own type is counted too. Cells of unticked types, unclassified cells and ignored classes are not counted. A window with no counted cells gets `CN = -1` and is left out of clustering.
 
-2. **Composition vector** — each window becomes a vector of **cell-type fractions** (what proportion of the window is Tumour, CD4 T, Treg, …), over the cell types you ticked. With **Include centre cell in its own window** on (paper default), the cell's own type is counted too. Cells whose class you didn't select — or that are unclassified/ignored — are excluded from the fractions. A window that ends up empty (no selected-type neighbours) is flagged `CN = -1` and left out of clustering. (The paper clusters raw type *counts*; for a fixed-size kNN window that is mathematically identical to clustering fractions, since every window is scaled by the same fixed cell count.)
+3. **k-means clustering**: the composition vectors are clustered into **Number of CNs** groups. Each group is one CN. Each cell's CN number (starting at 1) is written to the `CN` measurement; empty windows get `-1`. With **Sample multiple k-means seeds (more reproducible)** ticked (the default), k-means runs 10 times and keeps the best fit.
 
-3. **k-means clustering** — the composition vectors are clustered into **Number of CNs** groups with k-means. Each resulting cluster is one cellular neighborhood; every cell gets its cluster id written to the `CN` measurement (1-based; empty windows = `-1`). By default k-means is run several times from different seeds and the tightest (lowest-inertia) fit is kept — see the reproducibility note below.
+4. **Interpretation**: the mean composition of each CN is used for the enrichment heatmap and the diversity overlay.
 
-4. **Interpretation** — the mean composition of each CN feeds the enrichment heatmap and the diversity overlay.
+> **Standardize compositions before clustering** has the largest effect on results. Off (default, as in the paper): clusters separate the main tissue structure (tumour, stroma, interface). On: each cell type is scaled equally, so rare immune populations get their own clusters, but tumour and stroma merge into one or two large clusters. To get both, tick it, set **Number of CNs** to 12–15, and merge duplicate tumour clusters afterwards (§18.5).
 
-> **Raw vs standardized (the most important knob).** By default k-means clusters the **raw fractions**, matching the paper — this tends to resolve the *dominant* architecture (a tumour-purity gradient, stroma, interface). Tick **Standardize compositions before clustering** to z-score each cell-type column first, putting rare and common types on equal footing. Standardization pulls out **specific immune niches** far more sharply (each rare population tends to claim its own CN), but it **coarsens the tumour/stroma bulk** (much of the tissue collapses into one or two large CNs). Neither is "more correct" — pick by your question: architecture → leave it off; immune contexture → turn it on. If you want both, standardize at a higher **Number of CNs** (12–15) and merge the redundant tumour CNs afterward (§18.5).
-
-> **Seed reproducibility.** k-means starts from a random guess, so a single run is a dice roll — on validation data (the Schürch/Nolan replication) agreement with the published neighborhoods swung by ~0.3 (ARI) on seed alone. Tick **Sample multiple k-means seeds** (on by default) to run the clustering 10× and keep the lowest-inertia result, so runs are **reproducible** and unlucky seeds are avoided. Untick it for a single, faster run when iterating on parameters. It does not change *what* the method finds, only which local optimum you land in.
+> A single k-means run depends on its random starting point. On test data, agreement with the published neighbourhoods varied a lot between starting points. **Sample multiple k-means seeds (more reproducible)** (on by default) runs k-means 10 times and keeps the best result, so repeated runs give the same answer. Untick it for a faster single run while you try out settings.
 
 ### 18.3 Scope: current image vs whole project
 
-At the top of the dialog, **Scope** chooses what you cluster:
+**Scope**, at the top of the dialog, sets what is clustered:
 
-- **Current image** — fits k-means directly on every non-empty window of the open image. Fast, self-contained, good for exploring parameters on one slide.
-- **Whole project (cohort)** — fits **one** model across the images you choose, then writes a **consistent** CN to every image (CN 3 = the same micro-environment in every slide). This is what makes cross-patient comparison valid. It runs in two streaming passes so the whole project is never held in memory at once:
-  1. **Sample (fit):** pool a bounded random sample of windows across the selected images — drawn evenly per image so no single large slide dominates — and fit k-means once on that pool. The **Sample windows for fit** spinner caps the pool (50k is plenty for stable centroids); every cell is still assigned afterward.
-  2. **Assign:** stream image-by-image, recompute every cell's composition, assign it to its nearest fitted centroid, write the `CN` measurement, and **save each image**.
+- **Current image**: clusters every non-empty window in the open image. Use it to try settings on one image.
+- **Whole project**: fits one model across the images you choose, then writes a CN to every cell in every image. A CN number means the same micro-environment in every image (CN 3 is the same everywhere), so you can compare images. It runs in two passes and does not load the whole project into memory at once:
+  1. **Sample (fit):** take a random sample of windows, drawn evenly from each selected image, and fit k-means on it. **Sample windows for fit** (default 50,000, range 1,000–5,000,000) sets how many windows are used. Every cell is still assigned afterwards.
+  2. **Assign:** for each image, calculate every cell's composition, assign it to the nearest CN, write the `CN` measurement, and save the image.
 
-  Choosing project scope reveals **Choose images…**, **Add project…**, the **Sample windows for fit** spinner, and the **Parallel workers** spinner (§18.6).
+  Selecting **Whole project** shows **Choose images…**, **Add project…**, **Sample windows for fit** and **Parallel workers** (§18.6).
 
 #### Clustering more than one project together
 
-To pool several QuPath projects into **one** fit — e.g. two staining batches or two cohorts — click **Add project…** and select the other project's `project.qpproj`. Each added project contributes **all** its images; the fit pools this project's selected images plus every added project's images, and the assign pass writes CN back into **each image's own project** (each is read and saved in place). Nothing is copied between projects, so there's **no data duplication and no disk-quota blow-up** from merging `.qpdata` files. **Add project…** → **Clear** removes the added projects.
+To fit one model across several QuPath projects (for example two staining batches), click **Add project…** (next to **Also cluster projects:**) and select the other project's `project.qpproj`. All images in each added project are included, together with the images you selected in this project. Each image's results are saved in its own project. No files are copied between projects. **Clear** removes the added projects.
 
-> Two requirements for pooling to be valid: the projects must use the **same cell-class names** (compositions are keyed by class-name string), and be mindful of **batch effects** between separately-stained cohorts — check the CN-frequencies CSV for a per-project split, and consider **Standardize compositions** (§18.2). The cell-type checklist is read from the **open** image, so open a representative slide before running.
+> Projects clustered together must use the same cell class names, because compositions are matched by class name. Separately stained cohorts can also differ by batch: compare per-project CN fractions, and consider **Standardize compositions before clustering** (§18.2). The cell-type list comes from the open image, so open a typical image before you run.
 
 ### 18.4 Running it — step by step
 
 ![The Cellular Neighborhoods dialog](doc_images/cellular_neighbourhoods.png)
 
-*The dialog set for a whole-project run: 41 images pooled, a 500k-window fit sample, a kNN window, 10 CNs, the cell-type checklist, and the option tick-boxes. (This screenshot pre-dates later changes; the kNN control now reads **window (cells)** and defaults to `10` — the paper's 10-cell window — and a fourth option, **Sample multiple k-means seeds**, has since been added — see §18.2.) See §18.2 for what each option does.*
+*The dialog set up for a whole-project run. The current version has an extra option, **Sample multiple k-means seeds (more reproducible)**, and the kNN control is labelled **window (cells)**.*
 
-1. Open **Cellular Neighborhoods…**. Pick **Scope** (and, for project scope, **Choose images…**, plus **Add project…** to pool other projects).
-2. Choose the **Neighborhood window**: **k nearest neighbours** (set **window (cells)**; default `10` = a 10-cell window including the centre cell, matching the paper — see §18.2), **within radius** (set the radius), or **Delaunay triangulation** (density-adaptive; pick **max edge** with a fixed µm cutoff, default `50`, or **auto (Q3+1.5·IQR)**). Radius in tissue units is the more physically interpretable choice when calibrated; Delaunay is the choice when cell density varies a lot within or across images.
-3. Set **Number of CNs** (paper default 10). Fewer = coarser regions; more = finer, but expect redundancy you can merge later.
-4. Tick the **Cell types** to include (**All** / **None** shortcuts). Leave out debris/ignore classes.
-5. Options: **Include centre cell** (leave on to match the paper), **Standardize compositions** (see §18.2), **Sample multiple k-means seeds** (leave on for reproducible results — see §18.2), **Show enrichment heatmap after run**.
-6. **Pixel size** (µm/pixel) — optional; pre-filled from the image calibration. Set it if your images are uncalibrated and you want the radius interpreted in microns.
-7. For project scope, set **Sample windows for fit** and **Parallel workers**.
-8. Click **Run**. The log streams progress; in project scope you'll see per-image `sampled …` then `CN assigned …` lines, interleaved across workers.
+1. Open *Extensions → SP Classify → Cellular Neighborhoods...*. Choose **Scope**. For **Whole project**, click **Choose images…**, and **Add project…** to include other projects.
+2. Choose the **Neighborhood window** (see §18.2). Use **within radius** for a fixed physical distance on calibrated images, or **Delaunay triangulation** when cell density varies a lot.
+3. Set **Number of CNs** (default 10, range 2–30). Fewer gives broader regions. More gives finer regions, some of which you may need to merge.
+4. Tick the **Cell types** to include (**All** / **None** tick or untick every type). Leave out debris and ignored classes.
+5. Set the options: **Include centre cell in its own window** (leave ticked to match the paper), **Standardize compositions before clustering** (§18.2), **Sample multiple k-means seeds (more reproducible)** (leave ticked), **Show enrichment heatmap after run**.
+6. **Pixel size** (µm/pixel, optional) is filled in from the image calibration. For uncalibrated images, set it if you want the radius in µm.
+7. For project scope, check **Sample windows for fit** (default 50,000) and **Parallel workers** (default: number of CPU cores minus 1, up to 8; see §18.6).
+8. Click **Run**. The log shows progress. In project scope, each image logs a `sampled …` line and then a `CN assigned …` line; lines from different workers are mixed together.
 
 ### 18.5 The enrichment heatmap — reading, naming, merging
 
-If **Show enrichment heatmap** is on (or click **Show heatmap** later), you get the CN-by-cell-type enrichment map:
+The CN-by-cell-type enrichment heatmap opens after a run if **Show enrichment heatmap after run** is ticked, or when you click **Show heatmap**:
 
-- **Rows** = CNs (with cell counts and % of all cells); **columns** = cell types.
-- **Numbers** = each CN's mean composition fraction (**Show mean fractions**).
-- **Colour = z-score across each row** — it highlights the type a CN is *relatively enriched* for, so a rare population lights up bright red even at a low absolute fraction. Read the colour (what defines the CN) and the number (how much of it there is) together.
+- **Rows** = CNs, with cell counts and % of all cells. **Columns** = cell types.
+- **Numbers** = each CN's mean fraction of each cell type (shown when **Show mean fractions** is ticked).
+- **Colour** = z-score of each cell type across the CNs. Red means more of that cell type than in the other CNs, and blue means less, so a cell type that is low in absolute terms but higher than in other CNs is still shown in red. Read the colour (which type defines the CN) together with the number (how much of it there is).
 
 ![CN enrichment heatmap for a 10-CN project run](doc_images/cn_enrichment_heatmap_10_CN_whole_project_500k.png)
 
-*A finished 10-CN fit across a 42-image project. This is the main **outcome** you interpret. Reading a few rows shows what you typically get: **CN 8** (32.0% of all cells, tumour fraction 0.96) and **CN 1** (19.6%, 0.82) are the tumour bulk — the large, dominant architecture. **CN 4** (0.93 "Other") is stroma/background. The small, immune-defined rows are the biology you were after: **CN 5** (1.6%) is a TNFR2⁺ CD4 niche (0.33), **CN 7** (1.4%) an activated-CD8 pocket (0.26), and **CN 10** (2.8%) a Treg / activated-CD4 mix. Notice the split of outcomes: a raw-fraction fit like this resolves the dominant tumour/stroma structure cleanly but spreads it across several near-duplicate tumour CNs (1, 2, 8, 9) — the redundancy you collapse by giving them the same name (below), or avoid by ticking **Standardize compositions** to sharpen the rare immune niches instead (§18.2).*
+*A 10-CN result for a whole project. CN 8 and CN 1 are mostly tumour (32% and 20% of cells). CN 4 is stroma/other. CN 5, 7 and 10 are small immune-rich neighbourhoods (1–3% of cells). CNs 1, 2, 8 and 9 are all tumour-dominated; give them the same name to merge them (below).*
 
-**Name / merge:** type a name next to each CN and click **Apply names**. This writes two things to every cell, non-destructively:
-
-- **`CN Class`** — the **name** you typed (e.g. "tumour"), as a **text label in the cell's metadata**. QuPath measurements can only hold numbers, so the readable name lives in the metadata map, where it appears as a text column in the detection table and in cell-table exports. Empty-window cells get `Unassigned`.
-- **`CN Class code`** — a numeric code (1..m) for the same grouping, which is what the **Color by: CN Class** overlay uses (a colour map needs a number).
-
-**Giving two CNs the same name merges them** under one name and one code — the intended way to collapse the redundant CNs that a high **Number of CNs** produces (e.g. name three tumour-dominated CNs all "Tumour"). Merging only affects `CN Class` / `CN Class code`; the raw `CN` measurement keeps every original cluster id (1..k).
-
-**Where the results are stored.** All three outputs are written per cell and are **non-destructive** — none of them touch the cell's QuPath classification (`getPathClass()`), so your trained phenotypes are untouched. They appear as columns in the detection measurement table and in cell-table exports (§[12.1](#121-cell-table-export)):
+**Name / merge:** type a name next to each CN and click **Apply names**. Results appear as columns in the detection measurement table and in cell-table exports (§[12.1](#121-cell-table-export)). None of them change cell classifications.
 
 | Result | Written when | Stored as | Key | Values |
 |---|---|---|---|---|
 | Raw cluster id | **Run** | numeric **measurement** | `CN` | 1..k (empty-window cells = `-1`) |
 | Named class (readable) | **Apply names** | text **metadata** string | `CN Class` | the name you typed (empty-window cells = `Unassigned`) |
-| Named class (numeric) | **Apply names** | numeric **measurement** | `CN Class code` | 1..m (drives the *Color by: CN Class* overlay) |
+| Named class (numeric) | **Apply names** | numeric **measurement** | `CN Class code` | 1..m (used by the *Color by: CN Class* overlay) |
 
-> The human-readable `CN Class` lives in the cell **metadata** map (not the measurement list) because QuPath measurements can only hold numbers. In cell-table exports it comes through as a text column — make sure to tick it in the export column chooser, as metadata columns are listed after the numeric measurements.
+Giving two CNs the same name merges them. Only `CN Class` and `CN Class code` change; `CN` keeps the original cluster numbers. `CN Class` is stored as text in the cell's metadata, so in *Export → Cell Table...* you must tick it in the column list. It is listed after the numeric measurements.
 
-> **Saving & scope.** In **project scope**, Apply names is **cohort-wide**: it streams every image from the run (in parallel, reusing the **Parallel workers** count), writes `CN Class` / `CN Class code` to each cell from its saved `CN` id, and **saves every image** — so the whole cohort gets consistent, named classes in one click. The open image is updated live and saved too; the log streams per-image progress. In **current-image scope** it writes to the open image only and does **not** auto-save — press **Ctrl+S** to persist.
+> **Saving.** In project scope, **Apply names** updates and saves every image from the run, using the **Parallel workers** count. The open image is updated and saved too. In current-image scope it updates only the open image and does not save it; press **Ctrl+S** to save.
 
-**Export:** **Export as PNG…** saves the heatmap; **Export CN frequencies CSV…** saves the sample-by-CN frequency table — the key output for cohort analysis and for checking whether a CN's abundance tracks your biological groups (signal) or your staining batches (a batch effect to rule out).
+**Export:** **Export as PNG…** saves the heatmap. **Export CN frequencies CSV…** saves one row per CN: cell count, fraction of all cells, diversity, and the mean fraction of each cell type. For CN fractions per image, export the cell table (§[12.1](#121-cell-table-export)) with the `CN` or `CN Class` column and count the cells in each image. Use these to check whether CN frequencies follow your biological groups or your staining batches.
 
 ### 18.6 Parallel workers (project scope) — performance
 
-Both cohort passes (sample and assign) process images **in parallel**, one worker per image, controlled by the **Parallel workers** spinner (defaults to `min(8, cores − 1)`, up to your core count). Because each image is an independent read → compute → (for the assign pass) write+save, this scales close to linearly until you hit disk or memory limits.
+**Parallel workers** (default: number of CPU cores minus 1, up to 8) sets how many images are processed at once, in both the sample and the assign pass. Each worker loads one whole image's cells, so memory use rises with the worker count.
 
-- **Each worker loads a full image's cell hierarchy**, so higher worker counts are faster but use more memory. Dial it back on very large slides (hundreds of thousands of cells each).
-- **Many small images:** raise the worker count.
-- **A few very large images:** 2–4 workers is often the sweet spot.
-- Results are **deterministic regardless of worker count** — each image is sampled with its own fixed seed, so the fit is reproducible run to run (and with **Sample multiple k-means seeds** on, the k-means fit itself is stabilised too — §18.2).
+- For images with hundreds of thousands of cells, use 2–4 workers.
+- For many small images, use more workers.
+- Results are the same for any worker count.
 
 ### 18.7 Viewer overlays
 
-Three one-click, non-destructive recolourings drive the viewer from the last run (they map measurements via QuPath's overlay mapper; cells with `CN = -1` keep their phenotype colour):
+Three buttons recolour the viewer using the last run. They do not change the cells. Cells with `CN = -1` keep their classification colour.
 
-- **Color by: Neighborhood (CN)** — a distinct, **adjacency-aware** categorical palette (spatially-touching CNs get maximally contrasting colours so regions are easy to tell apart).
-- **Color by: CN Class** — colours the merged, named classes after you **Apply names** (driven by the numeric `CN Class code`).
-- **Color by: diversity** — colours each cell by its neighbourhood's cell-type **Shannon diversity** (0 = one type dominates, 1 = an even mix), useful for finding mixing zones and interfaces.
+- **Color by: Neighborhood (CN)**: one colour per CN. CNs that touch in the tissue get contrasting colours.
+- **Color by: CN Class**: one colour per named class, after **Apply names** (uses `CN Class code`).
+- **Color by: diversity**: colours each cell by the Shannon diversity of the cell types in its window (0 = one cell type, 1 = an even mix). Use it to find mixed zones and interfaces.
 
-Each toggle flips back to the classification colouring on a second click, and **closing the dialog automatically reverts the viewer to phenotype classifications** (so an active CN overlay never lingers and hides your classes).
+Click a button again to return to classification colours. Closing the dialog also returns the viewer to classification colours.
 
 ![CN overlay in the viewer alongside the enrichment heatmap and name/merge panel](doc_images/cn_cluster_visualisation.png)
 
-*The **Color by: Neighborhood (CN)** overlay painting the whole slide by micro-environment, next to the enrichment heatmap and the **Name / merge neighborhoods** panel. The adjacency-aware palette makes the tissue architecture legible at a glance — the yellow tumour bulk, the red/blue stromal and interface bands threading between the tumour islands, and the scattered immune pockets — turning the abstract cluster ids into a map you can read against the H&E-like structure. Type names into the panel on the right and click **Apply names** to collapse the redundant CNs and drive the **Color by: CN Class** overlay.*
+*The **Color by: Neighborhood (CN)** overlay, with the enrichment heatmap and the **Name / merge neighborhoods** panel. Neighbouring CNs get contrasting colours.*
 
 ### 18.8 Tips & cautions
 
-- **CN frequency varying across samples is usually the signal**, not noise — it's the per-patient readout you're after. But first rule out that it's technical: since the CN input is your phenotype labels, any **staining/batch effect in classification propagates straight into CN frequencies**. Check the frequencies CSV against your groups vs your batches.
-- **Watch for CN definitions encoding sample identity** — if a CN's cells come almost entirely from one or two images, that cluster may reflect an outlier slide rather than shared biology. Sub-2% CNs are the most fragile; confirm they replicate before interpreting.
-- **Run the classifier first.** CNs are only as good as the phenotypes underneath them.
-- The **radius** window makes density matter (dense regions have bigger windows); **kNN** normalises for density (every window has the same fixed number of cells). Choose deliberately.
+- **Check that differences in CN frequency are biological.** Differences between samples are usually the result you are looking for. But CNs are built from your cell classifications, so any staining or batch effect in classification carries into the CN frequencies. Compare per-image CN fractions between your groups and between your batches.
+- **Check CNs that come mostly from one or two images.** Such a CN may reflect one unusual slide rather than shared biology. CNs with less than 2% of cells are the least stable; confirm that they appear again (for example in another cohort or a repeat run) before you interpret them.
+- **Run the classifier first.** CN results depend on the quality of the cell classifications.
+- **within radius** vs **k nearest neighbours**: with **within radius**, dense regions have more cells per window. With **k nearest neighbours**, every window has the same number of cells, so density does not change window size. Choose the mode that suits your question.
 
 ---
 
 ## 19. Batch normalisation (UniFORM)
 
-Multiplex staining varies image-to-image — the same marker can sit at a different intensity on different slides or runs. **Batch normalisation** aligns each image's marker-intensity distribution to a common reference so that clustering and the classifier see one consistent intensity scale across a cohort, instead of learning the batch. SP Classify implements the **feature-level UniFORM** method (Wang et al., *Cell Reports Methods* 2025; see [README ▸ References](README.md#references)): for each marker it aligns per-image log-intensity histograms by the rigid shift that best matches a reference, and that shift maps back to a single per-image multiplicative **gain** per channel. Because it is a translation in log-space, the distribution's *shape* is preserved — only its location moves — so it is conservative about erasing real biology.
+Staining intensity often differs between slides or runs. Batch normalisation multiplies each image's intensity for each marker by one correction factor, so that the distribution lines up with a reference. Only the position of the distribution changes, not its shape. Clustering and the classifier then see the same intensity scale across the cohort. The method is feature-level UniFORM (Wang et al., *Cell Reports Methods* 2025; see [README ▸ References](README.md#references)).
 
-Open it from **Extensions ▸ SP Classify ▸ Batch Normalisation…**.
+Open it from *Extensions → SP Classify → Batch Normalisation...*.
 
-> The gain is computed from each channel's **Cell: Mean** intensities and then applied to every statistic of that channel. Only intensity measurements are corrected; foundation-model embeddings are excluded. Nothing is overwritten unless you explicitly write columns — see §19.4.
+> The correction factor for each channel is calculated from its **Cell: Mean** intensities (or **Cell: Median** if Mean is not selected) and applied to every selected measurement of that channel. Only intensity measurements are corrected; foundation-model embeddings are excluded. Existing measurements are never changed; corrected values are added as new columns only if you click **Write corrected columns** (§19.4).
 
 ### 19.1 When to use it
 
-- You cluster or train **across multiple images/slides** stained in different runs and see clusters or classes that track the *slide* rather than the biology.
-- It complements the clustering normalisation of §[4.2](#42-clustering-normalisation) (arcsinh/sqrt): that applies the **same** transform to every image and so cannot remove per-slide offsets (it says as much in its own limitations). Batch normalisation is the missing per-image step. Single-image analysis does not need it.
+- You cluster or train across images stained in different runs, and clusters or classes follow the slide rather than the biology.
+- Clustering normalisation (§[4.2](#42-clustering-normalisation)) applies the same transform to every image, so it cannot remove differences between slides. Batch normalisation corrects each image separately. You do not need it for a single image.
 
 ### 19.2 Fitting — step by step
 
-1. **Correct measurements** — *Choose measurements…* picks the marker intensities to align (embeddings are excluded automatically).
-2. **Images** — *Choose images…* picks the cohort. *Also include projects ▸ Add project…* pools images from other SP Classify projects into the same fit (they must share the marker/measurement names); *Clear* resets.
-3. **Batch grouping** (optional) — *Assign batches…* opens an Image → Batch table. Assign by double-clicking a cell, selecting rows → *Assign selected → batch…*, **Auto-detect from name**, or **Load CSV…**. The grouping drives per-batch mode and the QC view.
-4. **Granularity** —
-   - **Per image** — each image is aligned to the reference independently (finest correction).
-   - **Per batch** — images pooled within a batch are aligned together (uses the grouping above).
-5. **Advanced** — **Bins** (log-histogram resolution, default 1024), **Cells/image** (subsample cap for the fit, default 50,000), **Workers** (images processed in parallel).
-6. **Run fit** — computes the per-image/per-batch gains and saves them to `<project>/celltune/batch-shifts.json`. The fit persists across sessions and can be re-run any time.
+1. **Correct measurements**: click **Choose measurements…** and pick the marker intensities to align. Embeddings are excluded automatically.
+2. **Images**: click **Choose images…** to pick the images. To include images from another project, click **Add project…** (next to **Also include projects:**) and select its `project.qpproj`. Measurement names must match. **Clear** removes added projects.
+3. **Batch grouping** (optional): batches are first filled in from the image names. Click **Assign batches…** to edit them in the **Assign Images to Batches** table: double-click a cell, select rows and click **Assign selected → batch…**, or use **Auto-detect from name** or **Load CSV…**. Batches are used by **Per batch** mode and by the QC view.
+4. **Granularity**:
+   - **Per image (each image → reference)** (default): aligns each image to the reference separately.
+   - **Per batch (pool images in a batch)**: pools the images in each batch and aligns the batches. Differences between images in the same batch are kept.
+5. Set **Bins** (default 1024, range 64–4096), **Cells/image** (cells sampled per image for the fit, default 50,000, range 1,000–2,000,000) and **Workers** (images processed at once, default: number of CPU cores minus 1, up to 8).
+6. Click **Run fit**. It calculates the correction factors and saves them to `<project>/celltune/batch-shifts.json`. The fit is kept between sessions; you can run it again at any time.
 
 ### 19.3 QC — did it work?
 
-**Show QC** opens *Batch Normalisation — QC*: per-marker log-intensity density curves (one per batch) with a spread (SD) readout. **Lower SD = better aligned** — the curves should overlap after correction. Scan a few markers to confirm the batches were pulled together without collapsing genuine structure.
+**Show QC** opens *Batch Normalisation — QC*. For each marker it shows log-intensity density curves (one per batch) and the spread between batches before and after correction (**Before (SD)**, **After (SD)**). Lower SD means the batches are better aligned. Check several markers. After correction, the curves for each batch should overlap and the SD should fall. If a curve that had two peaks now has one, the correction may have removed real differences.
 
 ### 19.4 How it's applied
 
-Two independent options:
+There are two separate options:
 
-- **Streamed (recommended)** — tick **"Use batch-corrected values in clustering + ML"**. Clustering *and* classifier training/inference then multiply each cell's measurements by that image's fitted gain **in memory** before use: no columns are written, nothing on the cells changes, and the correction is applied consistently at every seam (clustering, training, and single-image auto-classify / batch-apply to other images). It is a persistent project preference (`celltune.useBatchCorrection`), so it stays on until you untick it, and is a no-op when no fit exists.
-- **Written columns** — **Write corrected columns** materialises the corrected values as new `…(batchnorm)` measurement columns (for export or inspection). The raw columns are left intact.
+- **In memory (recommended):** tick **Use batch-corrected values in clustering + ML (streamed, no columns)**. Clustering, training and classification then use corrected values in memory. Cell measurements are not changed. The setting is also in *Edit → Preferences → SP Classify* as **Use batch-corrected values**. It stays on until you untick it, and does nothing until a fit exists.
+- **Write corrected columns:** adds a `<marker>: Cell: Mean (batchnorm)` column for each corrected marker, for export or inspection. The raw columns are kept.
 
 ### 19.5 Tips & cautions
 
-- **Fit before you cluster or train** — the streamed toggle only does anything once a fit exists in the project.
-- **Grouping matters for per-batch mode** — with everything in one batch, per-batch mode is just a single-reference alignment; *Auto-detect from name* bootstraps groups from filename conventions.
-- **It can over-correct** — treating each slide as a batch can erase real biology if a cohort genuinely differs by group. QC each marker, and don't batch-correct across groups you expect to differ (mirrors the caution in §[18.8](#188-tips--cautions)).
-- **Cross-project fits** require a shared marker panel — measurement names must match across the pooled projects.
+- **Fit before you cluster or train.** The in-memory option does nothing until the project has a fit.
+- **Per batch mode needs a batch grouping.** If all images are in one batch, Per batch mode makes no correction. **Auto-detect from name** sets batches from image names.
+- **It can over-correct.** If your groups really differ in intensity, for example treated and control, putting them in different batches removes that difference. Check the QC view for each marker.
+- **Projects fitted together need the same marker panel**: measurement names must match in every project.
 
 ---
 
 ## 20. Tips, tricks and known limitations
 
-- **Label at least 20–30 cells per class** before the first Train, then trust the disagreement-driven Review Mode to grow your label set efficiently.
-- **Selecting cells** Hold Ctrl key on windows/linux or Command on Mac to select multiple cells at the same time to label.
-- **Channel Viewer** View > Channel viewer is very useful, it will display a view of the target area which all channels selected in channel select displayed.
-- **Resolve hierarchy before exporting** We also have noticed a bug where parent annotations are missing for exported cells, ContainingAnnotations will display them correctly.
-- **F1 scores can lie.** A held-out 20% split is honest within an image but optimistic across the project. Always sanity-check on a few unseen slides before believing the metrics.
-- **Pick different model types for Model 1 and Model 2.** Two XGBoosts won't disagree much, which kills the whole point.
-- **Images at once caps at 8.** Expect ~2–4 GB of memory per image on COMET data. It's a different thing from **CPU threads** — see §5.3.
-- **If training feels slow, read the log first.** Every run ends with a "Where the time went" table in `<project>/celltune/logs/`. It tells you which step to actually do something about instead of guessing.
-- **The channel mapping persists per project.** It's saved to `<project>/celltune/marker-table.json` (from the Channel Mapping editor or a CSV import) and reloaded automatically when you reopen the project, so auto-channel-switching during review survives QuPath restarts — no re-import needed. Each project keeps its own; to reuse one elsewhere, *Export CSV…* and import it in the other project. (*Reset Project State* clears it along with the rest of the `celltune/` folder.)
-- **Fixing a CSV that picks the wrong channels.** Open *Channel Mapping (Review Display)...*, **Import CSV…**, look for `~` / `!` / `✗` rows, fix the ticks, **Pin all matches**, **Save**. Details in [§4.4](#44-channel-mapping-for-review-marker-table).
-- **Project Prediction Summary needs ≥5 images** to give meaningful robust z-scores. On 2–3 image projects, treat the Anomaly column as overview or guide.
-- **Composite class colours.** Without "Prepend primary", QuPath generates a colour per unique composite name — you can end up with hundreds. Tick "Prepend primary" and your existing multi-class palette is preserved.
-- **No `.qpdata` save** when navigating from Project Prediction Summary — this is deliberate (saving large slides is slow and pointless for navigation). Manually save the image after editing it.
+- **Label at least 20–30 cells per class** before the first Train. Then use Review Mode to add labels where the two models disagree.
+- **Select several cells at once:** hold Ctrl (Windows/Linux) or Cmd (Mac) while clicking cells, then apply a label.
+- **Channel viewer:** *View → Channel viewer* shows the area under the cursor in every selected channel side by side.
+- **Run Resolve Hierarchy before exporting.** Without it, the `ParentAnnotations` column can be empty for some cells in exports; `ContainingAnnotations` still lists them. Run *Utility Scripts → Resolve Hierarchy...* first (§[13.2](#132-resolve-hierarchy)).
+- **Training Metrics overestimate accuracy on new images.** The 20% held-out cells come from the same images used for training. Check predictions on a few images with no labels before relying on the scores.
+- **Use different model types for Model 1 and Model 2.** Two models of the same type rarely disagree, so Review Mode finds few cells to review.
+- **Images at once is limited to 8.** Each image needs about 2–4 GB of memory on COMET data. This setting is separate from **CPU threads** — see §5.3.
+- **If training is slow, check the log.** Each run's log (`<project>/celltune/logs/training-<timestamp>.log`, last 20 kept) ends with a "Where the time went" table showing how long each step took.
+- **Channel mapping is saved per project** in `celltune/marker-table.json` and reloads when you reopen the project. To use it in another project, click **Export CSV…** in *Channel Mapping (Review Display)...* and import that CSV there. *Reset Project State* deletes it with the rest of `celltune/`.
+- **Fixing a CSV that picks the wrong channels.** Open *Channel Mapping (Review Display)...*, click **Import CSV…**, find rows marked `~`, `!` or `✗`, correct the ticks, click **Pin all matches**, then **Save**. Details in [§4.4](#44-channel-mapping-for-review-marker-table).
+- **Project Prediction Summary needs at least 5 images** for reliable robust z-scores. With 2–3 images, use the Anomaly column only as a rough guide.
+- **Composite class colours.** Without **Prepend current primary classification (colour follows primary)**, QuPath creates a colour for each composite name, which can mean hundreds of colours. Tick it to keep your existing class colours.
+- **Opening an image from Project Prediction Summary does not save the current image.** Save it yourself (Ctrl+S) before you switch if you have edited it.
 
 ---
 
-*Spot a missing step or an inaccurate label? Open an issue on the GitHub repo. Screenshots welcome.*
+*Found a missing step or a wrong label? Open an issue on the GitHub repo. Screenshots welcome.*

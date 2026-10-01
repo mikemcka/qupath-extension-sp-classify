@@ -2,31 +2,31 @@
 
 ### 12.1 Cell table export
 
-**Menu:** *Extensions → SP Classify → Export ▸ Cell Table...*
+**Menu:** *Extensions → SP Classify → Export → Cell Table...*
 
-For each selected image, writes `<ImageName>.csv` to your chosen folder with one row per detection:
+For each selected image, writes `<ImageName>.csv` to the folder you choose, with one row per detection:
 
 | Column | Notes |
 |---|---|
 | `Image` | Source image name |
 | `CellID` | QuPath cell UUID |
-| `CentroidX_um` / `CentroidY_um` | Centroid in microns, 2 decimals (falls back to pixel × calibration) |
-| `Area_um2` | Cell area in microns², 2 decimals |
-| `Classification` | Current `PathClass` (empty if unclassified) |
+| `CentroidX_um` / `CentroidY_um` | Centroid in microns, 2 decimals (pixel × calibration if no micron value) |
+| `Area_um2` | Cell area in µm², 2 decimals |
+| `Classification` | Current class (empty if unclassified) |
 | `ParentAnnotations` | All ancestor annotations, joined with `; ` |
-| `ContainingAnnotations` | Every annotation whose ROI geometrically contains the cell centroid (captures overlapping regions the hierarchy discards), joined with `; ` |
-| `Geometry_um` / `Geometry_px` | *(optional)* WKT `POLYGON` of the ROI outline, in microns or pixels — only written when polygon export is enabled |
-| feature columns | One column per measurement **or metadata field** you tick in the export dialog |
+| `ContainingAnnotations` | Every annotation whose outline contains the cell centroid, joined with `; `. Includes overlapping annotations that the hierarchy does not record as parents |
+| `Geometry_um` / `Geometry_px` | *(optional)* WKT `POLYGON` of the cell outline, in microns or pixels. Written only when **Export cell polygons (geometry)** is ticked |
+| feature columns | One column per measurement **or text field** you tick in the export dialog |
 
-Before exporting, a **Select Columns for Cell Table Export** dialog opens. It mirrors the *Select Features* dialog — search box, prefix dropdown, **Select Prefix** / **Clear Prefix**, **Select All** / **Clear All**, and a per-row checkbox — so you can pick exactly which columns land in the CSV. It pre-selects the curated subset (whole-cell means + any distance measurements). The chooser lists the **numeric measurements first, then the string metadata fields** (e.g. `CN Class`, `… original class`) — so text labels that aren't numeric measurements can now be exported too; filter for them by name if the list is long. Below the list, tick **Export cell polygons (geometry)** to include the ROI outline, and use the **Units** dropdown to choose **Microns (µm)** (`Geometry_um`) or **Pixels** (`Geometry_px`). Numeric measurements resolve to their value, metadata columns to their text value, and anything a cell doesn't have is written as `NA`.
+Before exporting, the **Select Columns for Cell Table Export** dialog opens. It works like *Select Features*: search box, prefix dropdown, **Select Prefix** / **Clear Prefix**, **Select All** / **Clear All**. The whole-cell mean measurements and any distance measurements are ticked by default. Numeric measurements are listed first, followed by text fields such as `CN Class`. To add cell outlines, tick **Export cell polygons (geometry)** and choose **Microns (µm)** or **Pixels** under **Units**. Any value a cell does not have is written as `NA`.
 
 ### 12.2 Ground truth export & import
 
-The extension's ground-truth files are a portable representation of your labelled cells **and** their feature vectors — they let you reuse labels across projects/workstations.
+Ground-truth files hold your labelled cells **and** their feature values, so you can reuse labels in other projects or on other computers.
 
 #### Export
 
-**Menu:** *Extensions → SP Classify → Export ▸ Ground Truth...*
+**Menu:** *Extensions → SP Classify → Export → Ground Truth...*
 
 Header (commented):
 ```
@@ -36,21 +36,21 @@ Header (commented):
 Image,Label,CentroidX,CentroidY,Feature1,Feature2,...
 ```
 
-Exports **raw** feature values only — the values the classifier trains/predicts on. (Earlier versions offered a normalised `__norm` column set; that was removed when normalisation became clustering-only.) Only labelled cells are exported.
+Exports raw feature values (the values the classifier uses) for labelled cells only.
 
-In multi-class mode the export pools labels from the current image plus all other project images. In **binary mode** use the dedicated menu item **Export ▸ Active Binary Ground Truth...** — it scopes to the active marker and includes previously-imported training rows from prior projects (so you can losslessly round-trip between projects).
+In multi-class mode the export includes labels from the current image and all other project images. In **binary mode** use **Export → Active Binary Ground Truth...** instead. It exports only the active marker and includes training rows imported from other projects, so the file can be moved between projects without losing rows.
 
 #### Import
 
-**Menu:** *Extensions → SP Classify → Import ▸ Ground Truth...*
+**Menu:** *Extensions → SP Classify → Import → Ground Truth...*
 
-After picking the CSV you choose one of two modes:
+After choosing the CSV, pick one of two modes:
 
-1. **Spatial Match** (per-image) — each imported row is matched to the nearest detection by centroid distance (you set the max threshold, default 20 px). Rows outside the threshold are skipped. Use this when you're re-importing labels onto the **same** image they were exported from.
-2. **Training Data Only** (cross-project) — imports the feature vectors + labels without mapping back to cells. Use this when the source image isn't open in the current project; the rows feed straight into the next training run as if they were locally-labelled cells. The sidebar shows the count as `Imported rows: N`.
+1. **Spatial Match** (per image) — each imported row is matched to the nearest detection by centroid distance, up to a maximum distance you set (default 20 px). Rows with no detection within that distance are skipped. Use this to re-import labels onto the **same** image they were exported from.
+2. **Training Data Only** (cross-project) — imports the feature values and labels without matching them to cells. Use this when the source image is not in the current project. The rows are used in the next training run in the same way as labels on cells. The sidebar shows the count as `Imported rows: N`.
 
-The binary equivalents are **Import ▸ Active Binary Ground Truth...** — same modes, but scoped to the active marker.
+For binary mode use **Import → Active Binary Ground Truth...**. It has the same two modes but applies only to the active marker.
 
-> **There is no "ground truth bundle" (ZIP)** currently — only the per-CSV import/export described here. The `.planning/phases/12` document scopes a bundle format as a future feature.
+> Ground truth can only be exported and imported as single CSV files. There is no ZIP bundle option.
 
 ---

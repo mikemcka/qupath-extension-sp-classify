@@ -5,7 +5,8 @@ Build one **positive/negative classifier per marker** (CD3, CD4, CD8, CD20…), 
 ```
 Select Features  →  Clustering Normalisation
        ↓
-Binary Classifiers... → Create "CD3" → Open (enters Binary Mode)
+Extensions → SP Classify → Binary Classifiers... → Create... (name it CD3)
+→ Open (enters Binary Mode)
        ↓
 Manual Label Mode → label CD3-positive vs CD3-negative cells
        ↓
@@ -15,14 +16,15 @@ Exit Binary Mode → repeat for CD4, CD8, CD20, etc.
        ↓
 Composite Classification... → tick markers, tick images
        ↓
-(optional) tick "Prepend current primary classification" to keep
-multiclass colouring
+(optional) tick "Prepend current primary classification (colour follows
+primary)" so each cell keeps its multi-class class name and colour in
+front of the marker labels
        ↓
 Apply → composite labels appear in viewer (Tumour:CD3+:CD8-, …)
        ↓
 Export Cell Table
 ```
 
-Detail per step is in §[6](binary-composite.md).
+Each step is described in §[6](binary-composite.md).
 
 ---

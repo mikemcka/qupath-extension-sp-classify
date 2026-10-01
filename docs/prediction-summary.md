@@ -1,23 +1,27 @@
-# Project Prediction Summary - Experimental
+# Project Prediction Summary
+
+> **Experimental.**
 
 **Menu:** *Extensions → SP Classify → Project Prediction Summary...*
 
-Cohort-level QC across every image in your project. Loads the saved `Pred_ALL` results from `<project>/celltune/image-predictions/` and runs an anomaly analysis. See [HOW_IT_WORKS_PREDICTION_SUMMARY](#anatomy-of-the-anomaly-score) below for the maths.
+Shows one row per project image, using the saved predictions in `<project>/celltune/image-predictions/`, and gives each image an anomaly score so you can find the images to check first. See [How the anomaly score is calculated](#anatomy-of-the-anomaly-score).
 
-> For a **cells-free** prescreen that works straight off the pixels — before any segmentation exists — see §[17 Image pixel prescreen](pixel-prescreen.md).
+> To check images before cell segmentation, using pixel values only, see §[17 Image pixel prescreen](pixel-prescreen.md).
 
 **Table columns:** Image, Predicted, Agreements, Disagreements, Agreement %, Anomaly, Flagged.
 
 **Filters:**
-- **Flagged only** — hide rows with no flag.
-- **Target class** — restrict to images where a specific rare class is enriched.
-- **Threshold preset** — *strict* (anomaly ≥ 1.5), *balanced* (≥ 0.5), *sensitive* (≥ 0.0, default — shows everything). This is a **display** filter; the analysis is not re-run.
+- **Flagged only**: hide images that have no flag.
+- **Target class:** show only images where the chosen class has the `RARE_ENRICHMENT` flag. The list contains only classes that have this flag in at least one image. Default: **All classes**.
+- **Threshold preset:** hide unflagged images whose anomaly score is below the preset: `strict` 1.5, `balanced` 0.5, `sensitive` 0.0 (default; shows every image). Flagged images are always shown. The analysis is not re-run.
 
 **Buttons:**
-- **Open Selected Image** — jumps QuPath to that image without saving the current one (deliberately fast for navigation).
-- **Export CSV** — flattened table of currently-visible rows.
+- **Open Selected Image**: opens the selected image.
+- **Export CSV**: saves the rows currently shown as a CSV file.
 
-**Details pane** (below the table) for the selected row: anomaly score, flag reasons, rare-enrichment summary, per-class counts.
+> ⚠️ **Open Selected Image discards unsaved changes in the current image without asking.** Save first (*File → Save*) if you have made changes.
+
+**Details pane** (below the table): for the selected image, shows the anomaly score, flag reasons, rare-class enrichment and the number of cells per class.
 
 ![Project Prediction Summary](doc_images/prediction_summary.png)
 
@@ -25,28 +29,24 @@ Cohort-level QC across every image in your project. Loads the saved `Pred_ALL` r
 
 For each image:
 
-1. **Composition distance** — Jensen-Shannon distance between this image's class-fraction distribution and the project-wide baseline (with Laplace smoothing).
-2. **Disagreement rate** — `disagreements / predicted`.
-3. Both signals are converted to **robust z-scores** (median + MAD, so one extreme image can't suppress the scale) across the cohort.
-4. `Anomaly score = 0.65 × max(0, z_composition) + 0.35 × max(0, z_disagreement)`.
+1. **Composition distance**: how different the image's class proportions are from the whole project (Jensen-Shannon distance).
+2. **Disagreement rate**: disagreements ÷ predicted cells.
+3. Both values are converted to robust z-scores across all images. These use the median and the median absolute deviation (MAD), so one extreme image does not change the scale for the others.
+4. `Anomaly score = 0.65 × max(0, z_composition) + 0.35 × max(0, z_disagreement)`. Negative z-scores count as 0.
+
+Composition has the larger weight because the disagreement rate partly depends on which two model types you chose. Use the score to rank images. It is not a probability.
 
 **Flag reasons:**
-- `RARE_ENRICHMENT` — a class that is <1% of the cohort, has ≥20 cells in this image, and is ≥3× enriched vs the baseline.
-- `COMPOSITION_OUTLIER` — composition robust z ≥ 3.
-- `HIGH_DISAGREEMENT` — disagreement robust z ≥ 3.
-
-**Why these numbers?** Most are standard statistical conventions, not arbitrary:
-- **Robust z ≥ 3** is the classic *3-sigma* outlier rule. The robust z uses `0.6745 × (value − median) / MAD`, where `0.6745` is the constant that makes MAD a consistent estimator of the standard deviation for normal data — so the score sits on the same scale as an ordinary z-score and "≥ 3" means the same thing it always does (~0.1% one-tailed under normality).
-- **Rare enrichment (<1%, ≥20 cells, ≥3×)** is an **AND gate**: a class must be rare cohort-wide *and* have enough cells to not be noise *and* be meaningfully concentrated here. The ≥20-cell floor stops a handful of misclassifications from faking a "3× enrichment"; <1% and 3× are round "rare" / "real, not jitter" conventions.
-- **Laplace smoothing** (add-one) keeps a class with zero cells in one image from blowing up the composition distance.
-- **0.65 / 0.35 weighting** is the one judgement call. Composition drift (a slide whose whole class makeup differs) is a more trustworthy "this slide is different" signal than raw disagreement rate, which is noisier and partly an artefact of *which two model types* you picked — so composition gets the heavier weight. The two weights are forced to sum to 1, so the score is a convex blend, not two independent dials. Treat the score as a **ranking aid**, not a calibrated probability.
+- `RARE_ENRICHMENT`: a class that is under 1% of all cells in the project has at least 20 cells in this image and is at least 3× more common here than in the whole project.
+- `COMPOSITION_OUTLIER`: composition z-score ≥ 3.
+- `HIGH_DISAGREEMENT`: disagreement z-score ≥ 3.
 
 **How to use it:**
-- Sort by Anomaly (default). Top rows = look at these first.
-- Flagged + high disagreement → the classifier doesn't understand this slide. **Open it, label 10–20 cells, re-train.**
-- Flagged + composition outlier but low disagreement → real biology that's atypical for the cohort, or staining drift / segmentation artefact. Visual check.
-- Rare enrichment → check whether the rare class is real (good, you've found something) or a per-slide artefact masquerading as it.
+- Sort by **Anomaly** (the default sort). Check the top rows first.
+- Flagged with high disagreement: the classifier performs poorly on this image. Open it, label 10–20 cells, and retrain.
+- Composition outlier with low disagreement: either a real biological difference, or a staining or segmentation problem. Check the image visually.
+- Rare enrichment: check whether the cells really are that class, or are a staining or segmentation artefact.
 
-> Robust z is noisy on tiny projects (< ~5 images). Don't overinterpret on small cohorts.
+> With fewer than 5 images, the z-scores are unreliable.
 
 ---

@@ -7,11 +7,13 @@ Select Features  →  Clustering Normalisation  →  Create classes (Class Contr
        ↓
 Channel Mapping (optional, for auto channel switching)
        ↓
-Manual Label Mode  → label ~20–50 cells across the open image
+Manual Label Mode  → label at least 20–30 cells per class
+                     (training needs at least 10 labelled cells in total)
        ↓
 Apply to which images... → choose images to predict on
        ↓
-Set Images at once, pick settings (Pool labels, Balancing, Early stopping, etc.)
+Set training options: Pool labels from all images, Enable data balancing,
+Early stopping, Images at once (images predicted in parallel; default 1, max 8)
        ↓
 Train  →  inspect Training Metrics + Confusion Matrix
        ↓
@@ -24,6 +26,6 @@ Project Prediction Summary  →  flag outlier slides → re-label as needed
 Export Cell Table  or  Export Ground Truth
 ```
 
-Detail per step is in §[4](setup.md), §[5](multiclass.md), §[7](review-mode.md).
+Each step is described in §[4](setup.md), §[5](multiclass.md) and §[7](review-mode.md).
 
 ---

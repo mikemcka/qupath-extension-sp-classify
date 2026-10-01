@@ -1,10 +1,10 @@
 # SP Classify for QuPath
 
-A [QuPath](https://qupath.github.io/) 0.7 extension that brings **human-in-the-loop active
-learning** to cell classification in highly multiplexed images. It trains two gradient-boosted
-models (XGBoost + LightGBM) simultaneously, flags the cells where they disagree, and presents
-those disputed cells for review — an iterative loop that progressively improves accuracy from a
-few hundred labels rather than thousands.
+A cell classifier for [QuPath](https://qupath.github.io/) 0.7, for highly multiplexed images,
+that learns from cells you label. It trains two models on the same labels (XGBoost and LightGBM
+by default) and lists the cells where the two models predict different classes, so you can check
+and correct those cells first. You then retrain and repeat. It runs inside QuPath and does not
+need Python.
 
 !!! info "Citing SP Classify"
     If you use this tool, please cite both the software and the CellTune paper it derives from,

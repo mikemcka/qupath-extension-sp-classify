@@ -25,10 +25,11 @@ import qupath.lib.regions.RegionRequest;
  * the cohort statistics comparable like-for-like regardless of each slide's
  * native size or pyramid structure.
  * <p>
- * <b>Memory note:</b> one downsampled region (all channels) is held in memory at
- * once, plus a transient per-channel copy. At the default 2048px target this is
- * modest for a handful of channels but grows with channel count; lower
- * {@code maxLongEdge} for very highly multiplexed images.
+ * <b>Memory note:</b> each read holds one downsampled region (all channels) plus a
+ * transient per-channel copy, and {@code AnalysisViews} runs up to 4 reads at once.
+ * At the default 2048px target this is modest for a handful of channels but grows
+ * with channel count; {@code maxLongEdge} is not exposed in the UI, so lowering it
+ * for very highly multiplexed images is a code change.
  */
 public final class ImagePixelStatsReader {
 
