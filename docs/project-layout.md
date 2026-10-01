@@ -4,17 +4,18 @@ Everything the extension writes is under `<project>/celltune/`:
 
 ```
 celltune/
-├── classifier-state.json         # Multi-class model (features, classes, model bytes, labels, normalisation)
-├── composite-rules.json          # Saved CompositeClassificationRule objects (advanced/programmatic)
-├── marker-table.json             # Channel mapping for review (markers + exact channels, schema v2) — per project, persists across restarts
-├── binary-registry.json          # markerName → state file path
-├── labels_backup_YYYYMMDD_HHMMSS.json   # Auto-snapshot before each Train
+├── classifier-state.json         # Multi-class model (features, classes, models, labels, normalisation)
+├── composite-rules.json          # Saved composite classification rules
+├── marker-table.json             # Channel mapping for review (§4.4)
+├── binary-registry.json          # List of binary classifiers and their state files
+├── batch-shifts.json             # Batch normalisation fit (§19)
+├── labels_backup_YYYYMMDD_HHMMSS.json   # Copy of the labels, saved before each Train
 │
 ├── image-labels/                 # Multi-class labels, one JSON per image
 │   ├── slide1.json               #   { "<cellId>": "T-Cell", ... }
 │   └── ...
 │
-├── binary-image-labels/<marker>/ # Same per-image JSON, scoped per binary marker
+├── binary-image-labels/<marker>/ # Same per-image JSON, one folder per binary marker
 │   ├── CD3/slide1.json
 │   └── ...
 │
@@ -24,9 +25,10 @@ celltune/
 │   └── ...
 │
 ├── image-sampled/                # Cell IDs already sampled for review
-├── image-predictions/            # Per-image Pred_ALL — consumed by Project Prediction Summary
+├── image-predictions/            # Predictions for each image, used by Project Prediction Summary
+├── logs/                         # Training logs (last 20 kept)
 ```
 
-JSON throughout. Model bytes are Base64-encoded inside the state files. Safe to commit `celltune/` to git if you want shared review history.
+All files are JSON. You can put `celltune/` under version control (for example git) to share labels and review history.
 
 ---

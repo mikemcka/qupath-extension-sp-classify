@@ -2,131 +2,121 @@
 
 **Menu:** *Extensions → SP Classify → Cellular Neighborhoods...*
 
-Cellular neighborhoods (CNs) group cells not by *what they are* but by *what surrounds them*. Instead of a cell's own phenotype, each cell is described by the **cell-type mixture of its local spatial window**, and those mixture vectors are clustered so the tissue is partitioned into recurring micro-environments — tumour core, tumour–stroma interface, immune niches, and so on. This is the Schürch/Nolan method — Schürch et al., "Coordinated Cellular Neighborhoods Orchestrate Antitumoral Immunity at the Colorectal Cancer Invasive Front," *Cell* 2020 ([full citation & acknowledgement in the README](https://github.com/mikemcka/qupath-extension-sp-classify/blob/main/README.md)). If you use this feature, please cite that paper.
+Cellular neighborhoods (CNs) group cells by the cell types around them, not by their own type. Each cell is described by the mix of cell types in its local window. These mixes are clustered into recurring micro-environments, such as tumour core, tumour–stroma interface or immune niches. This is the method of Schürch et al., "Coordinated Cellular Neighborhoods Orchestrate Antitumoral Immunity at the Colorectal Cancer Invasive Front," *Cell* 2020 ([full citation & acknowledgement in the README](https://github.com/mikemcka/qupath-extension-sp-classify/blob/main/README.md)). If you use this feature, please cite that paper.
 
-**The purpose of the clustering.** A per-cell phenotype tells you *what a cell is*; it says nothing about *where it sits*. Two CD8 T cells with identical marker profiles behave very differently if one is buried in tumour and the other is in an organised immune aggregate at the invasive margin. CN clustering recovers that spatial context automatically: rather than you hand-drawing "tumour", "stroma" and "interface" regions, k-means discovers the handful of recurring tissue states directly from the local cell-type composition, then labels **every** cell with the state it lives in. The output is both a **map** (regions you can see and overlay in the viewer) and a **per-image number** (what fraction of each patient's tissue is each state) that you can carry into cohort statistics.
+Use this when cells of the same type behave differently depending on where they are, for example CD8 T cells inside tumour compared with CD8 T cells at the invasive margin. Instead of drawing tumour, stroma and interface regions by hand, k-means finds recurring neighbourhood compositions and labels every cell with one. You get a map in the viewer and a `CN` value on every cell, from which you can calculate the fraction of each image in each CN and compare across the cohort.
 
-It is fully **non-destructive**: the CN id is written as a numeric `CN` measurement (and, once you name them, a `CN Class` text label in each cell's metadata plus a numeric `CN Class code`), never as a QuPath classification, so your trained phenotypes (`getPathClass()`) are untouched. Requires cells that already carry classifications (run the classifier first, or import them).
+Results are written as new measurements (see §18.5). Cell classifications are not changed. You need cells that already have classifications, either from running the classifier or from an import.
 
 ### 18.1 When to use it
 
-- You want to find **tissue architecture** (tumour vs stroma vs interface) or **immune micro-environments** (an activated-CD8 niche, a Treg pocket) that a per-cell phenotype can't express.
-- You want a **per-image feature** that is comparable across a cohort — e.g. "what fraction of each patient's tissue is the activated-CD8 niche" — for downstream group comparisons.
+- You want to find **tissue architecture** (tumour, stroma, interface) or **immune micro-environments** (an activated-CD8 niche, a Treg-rich area) that a per-cell phenotype does not show.
+- You want a **per-image value** that you can compare across a cohort, for example "the fraction of each patient's tissue in the activated-CD8 niche", for group comparisons.
 
 ### 18.2 How the clusters are computed
 
-The pipeline is the same four steps whether you run one image or the whole project:
+The same four steps run for one image or the whole project:
 
-1. **Neighbour window** — for every cell, find its local spatial neighbourhood, in one of three modes:
-   - **k nearest neighbours** — each cell's neighbourhood is built from its closest *other* cells of *any* type (Euclidean on centroids). The **window (cells)** spinner sets the **total window size**: with **Include centre cell** on the window is the centre cell plus its nearest neighbours; with it off it is that many nearest neighbours. The **default of 10 matches the paper** — a 10-cell window (Schürch et al. use the 10 nearest neighbours *including the cell itself*). *(The spinner counts total cells; internally the centre is one of them, so a window of 10 with the centre included finds 9 neighbours.)*
-   - **within radius** — every cell within a fixed radius (in µm when calibrated, else px).
-   - **Delaunay triangulation** — neighbours are the cells joined to it by an edge of the Delaunay triangulation, so the window adapts to local density (denser regions → tighter windows) with no *k* or radius to pick. Long edges are pruned so sparse/border cells aren't linked across empty tissue: choose **max edge** for a fixed cutoff (default `50` µm — cell centroids are typically 10–30 µm apart, so this keeps immediate neighbours and clips cross-void links) or **auto (Q3+1.5·IQR)** to cut each image at the Tukey upper whisker of its own edge-length distribution (adapts per image across a mixed-density cohort — the convention used by Giotto's Delaunay network). A cell whose every Delaunay edge is pruned gets an empty window (`CN = -1`), just like a too-small radius.
+1. **Neighbour window**: for every cell, find the cells around it, using one of three modes. A cell is never counted as its own neighbour; **Include centre cell in its own window** adds it back (step 2).
+   - **k nearest neighbours**: the window is a fixed number of cells (**window (cells)**, default 10, range 2–100). With **Include centre cell in its own window** ticked, a window of 10 is the cell itself plus its 9 nearest neighbours, as in Schürch et al. With it unticked, it is the 10 nearest neighbours.
+   - **within radius**: every cell within a set distance (default 50, range 5–500; µm if the image is calibrated, otherwise pixels).
+   - **Delaunay triangulation**: neighbours are the cells directly connected to it in a triangulation, so the window size follows local cell density. Long connections across empty space are removed. Choose **max edge** for a fixed limit (default 50, range 1–2000; µm if calibrated, otherwise pixels) or **auto (Q3+1.5·IQR)** to set the limit separately for each image from its own connection lengths. A cell with no remaining connections gets `CN = -1`.
 
-   All three use a spatially-indexed search (JTS `STRtree` for kNN/radius, JTS `DelaunayTriangulationBuilder` for Delaunay), so it scales to hundreds of thousands of cells per image. A cell's own coordinates are excluded from its neighbour list (the centre is added back separately by the option below).
+2. **Composition vector**: each window becomes a list of cell-type fractions (the proportion of Tumour, CD4 T, Treg, … in the window), using only the cell types you tick. With **Include centre cell in its own window** ticked (the default, as in the paper), the cell's own type is counted too. Cells of unticked types, unclassified cells and ignored classes are not counted. A window with no counted cells gets `CN = -1` and is left out of clustering.
 
-2. **Composition vector** — each window becomes a vector of **cell-type fractions** (what proportion of the window is Tumour, CD4 T, Treg, …), over the cell types you ticked. With **Include centre cell in its own window** on (paper default), the cell's own type is counted too. Cells whose class you didn't select — or that are unclassified/ignored — are excluded from the fractions. A window that ends up empty (no selected-type neighbours) is flagged `CN = -1` and left out of clustering. (The paper clusters raw type *counts*; for a fixed-size kNN window that is mathematically identical to clustering fractions, since every window is scaled by the same fixed cell count.)
+3. **k-means clustering**: the composition vectors are clustered into **Number of CNs** groups. Each group is one CN. Each cell's CN number (starting at 1) is written to the `CN` measurement; empty windows get `-1`. With **Sample multiple k-means seeds (more reproducible)** ticked (the default), k-means runs 10 times and keeps the best fit.
 
-3. **k-means clustering** — the composition vectors are clustered into **Number of CNs** groups with k-means. Each resulting cluster is one cellular neighborhood; every cell gets its cluster id written to the `CN` measurement (1-based; empty windows = `-1`). By default k-means is run several times from different seeds and the tightest (lowest-inertia) fit is kept — see the reproducibility note below.
+4. **Interpretation**: the mean composition of each CN is used for the enrichment heatmap and the diversity overlay.
 
-4. **Interpretation** — the mean composition of each CN feeds the enrichment heatmap and the diversity overlay.
+> **Standardize compositions before clustering** has the largest effect on results. Off (default, as in the paper): clusters separate the main tissue structure (tumour, stroma, interface). On: each cell type is scaled equally, so rare immune populations get their own clusters, but tumour and stroma merge into one or two large clusters. To get both, tick it, set **Number of CNs** to 12–15, and merge duplicate tumour clusters afterwards (§18.5).
 
-> **Raw vs standardized (the most important knob).** By default k-means clusters the **raw fractions**, matching the paper — this tends to resolve the *dominant* architecture (a tumour-purity gradient, stroma, interface). Tick **Standardize compositions before clustering** to z-score each cell-type column first, putting rare and common types on equal footing. Standardization pulls out **specific immune niches** far more sharply (each rare population tends to claim its own CN), but it **coarsens the tumour/stroma bulk** (much of the tissue collapses into one or two large CNs). Neither is "more correct" — pick by your question: architecture → leave it off; immune contexture → turn it on. If you want both, standardize at a higher **Number of CNs** (12–15) and merge the redundant tumour CNs afterward (§18.5).
-
-> **Seed reproducibility.** k-means starts from a random guess, so a single run is a dice roll — on validation data (the Schürch/Nolan replication) agreement with the published neighborhoods swung by ~0.3 (ARI) on seed alone. Tick **Sample multiple k-means seeds** (on by default) to run the clustering 10× and keep the lowest-inertia result, so runs are **reproducible** and unlucky seeds are avoided. Untick it for a single, faster run when iterating on parameters. It does not change *what* the method finds, only which local optimum you land in.
+> A single k-means run depends on its random starting point. On test data, agreement with the published neighbourhoods varied a lot between starting points. **Sample multiple k-means seeds (more reproducible)** (on by default) runs k-means 10 times and keeps the best result, so repeated runs give the same answer. Untick it for a faster single run while you try out settings.
 
 ### 18.3 Scope: current image vs whole project
 
-At the top of the dialog, **Scope** chooses what you cluster:
+**Scope**, at the top of the dialog, sets what is clustered:
 
-- **Current image** — fits k-means directly on every non-empty window of the open image. Fast, self-contained, good for exploring parameters on one slide.
-- **Whole project (cohort)** — fits **one** model across the images you choose, then writes a **consistent** CN to every image (CN 3 = the same micro-environment in every slide). This is what makes cross-patient comparison valid. It runs in two streaming passes so the whole project is never held in memory at once:
-  1. **Sample (fit):** pool a bounded random sample of windows across the selected images — drawn evenly per image so no single large slide dominates — and fit k-means once on that pool. The **Sample windows for fit** spinner caps the pool (50k is plenty for stable centroids); every cell is still assigned afterward.
-  2. **Assign:** stream image-by-image, recompute every cell's composition, assign it to its nearest fitted centroid, write the `CN` measurement, and **save each image**.
+- **Current image**: clusters every non-empty window in the open image. Use it to try settings on one image.
+- **Whole project**: fits one model across the images you choose, then writes a CN to every cell in every image. A CN number means the same micro-environment in every image (CN 3 is the same everywhere), so you can compare images. It runs in two passes and does not load the whole project into memory at once:
+  1. **Sample (fit):** take a random sample of windows, drawn evenly from each selected image, and fit k-means on it. **Sample windows for fit** (default 50,000, range 1,000–5,000,000) sets how many windows are used. Every cell is still assigned afterwards.
+  2. **Assign:** for each image, calculate every cell's composition, assign it to the nearest CN, write the `CN` measurement, and save the image.
 
-  Choosing project scope reveals **Choose images…**, **Add project…**, the **Sample windows for fit** spinner, and the **Parallel workers** spinner (§18.6).
+  Selecting **Whole project** shows **Choose images…**, **Add project…**, **Sample windows for fit** and **Parallel workers** (§18.6).
 
 #### Clustering more than one project together
 
-To pool several QuPath projects into **one** fit — e.g. two staining batches or two cohorts — click **Add project…** and select the other project's `project.qpproj`. Each added project contributes **all** its images; the fit pools this project's selected images plus every added project's images, and the assign pass writes CN back into **each image's own project** (each is read and saved in place). Nothing is copied between projects, so there's **no data duplication and no disk-quota blow-up** from merging `.qpdata` files. **Add project…** → **Clear** removes the added projects.
+To fit one model across several QuPath projects (for example two staining batches), click **Add project…** (next to **Also cluster projects:**) and select the other project's `project.qpproj`. All images in each added project are included, together with the images you selected in this project. Each image's results are saved in its own project. No files are copied between projects. **Clear** removes the added projects.
 
-> Two requirements for pooling to be valid: the projects must use the **same cell-class names** (compositions are keyed by class-name string), and be mindful of **batch effects** between separately-stained cohorts — check the CN-frequencies CSV for a per-project split, and consider **Standardize compositions** (§18.2). The cell-type checklist is read from the **open** image, so open a representative slide before running.
+> Projects clustered together must use the same cell class names, because compositions are matched by class name. Separately stained cohorts can also differ by batch: compare per-project CN fractions, and consider **Standardize compositions before clustering** (§18.2). The cell-type list comes from the open image, so open a typical image before you run.
 
 ### 18.4 Running it — step by step
 
 ![The Cellular Neighborhoods dialog](doc_images/cellular_neighbourhoods.png)
 
-*The dialog set for a whole-project run: 41 images pooled, a 500k-window fit sample, a kNN window, 10 CNs, the cell-type checklist, and the option tick-boxes. (This screenshot pre-dates later changes; the kNN control now reads **window (cells)** and defaults to `10` — the paper's 10-cell window — and a fourth option, **Sample multiple k-means seeds**, has since been added — see §18.2.) See §18.2 for what each option does.*
+*The dialog set up for a whole-project run. The current version has an extra option, **Sample multiple k-means seeds (more reproducible)**, and the kNN control is labelled **window (cells)**.*
 
-1. Open **Cellular Neighborhoods…**. Pick **Scope** (and, for project scope, **Choose images…**, plus **Add project…** to pool other projects).
-2. Choose the **Neighborhood window**: **k nearest neighbours** (set **window (cells)**; default `10` = a 10-cell window including the centre cell, matching the paper — see §18.2), **within radius** (set the radius), or **Delaunay triangulation** (density-adaptive; pick **max edge** with a fixed µm cutoff, default `50`, or **auto (Q3+1.5·IQR)**). Radius in tissue units is the more physically interpretable choice when calibrated; Delaunay is the choice when cell density varies a lot within or across images.
-3. Set **Number of CNs** (paper default 10). Fewer = coarser regions; more = finer, but expect redundancy you can merge later.
-4. Tick the **Cell types** to include (**All** / **None** shortcuts). Leave out debris/ignore classes.
-5. Options: **Include centre cell** (leave on to match the paper), **Standardize compositions** (see §18.2), **Sample multiple k-means seeds** (leave on for reproducible results — see §18.2), **Show enrichment heatmap after run**.
-6. **Pixel size** (µm/pixel) — optional; pre-filled from the image calibration. Set it if your images are uncalibrated and you want the radius interpreted in microns.
-7. For project scope, set **Sample windows for fit** and **Parallel workers**.
-8. Click **Run**. The log streams progress; in project scope you'll see per-image `sampled …` then `CN assigned …` lines, interleaved across workers.
+1. Open *Extensions → SP Classify → Cellular Neighborhoods...*. Choose **Scope**. For **Whole project**, click **Choose images…**, and **Add project…** to include other projects.
+2. Choose the **Neighborhood window** (see §18.2). Use **within radius** for a fixed physical distance on calibrated images, or **Delaunay triangulation** when cell density varies a lot.
+3. Set **Number of CNs** (default 10, range 2–30). Fewer gives broader regions. More gives finer regions, some of which you may need to merge.
+4. Tick the **Cell types** to include (**All** / **None** tick or untick every type). Leave out debris and ignored classes.
+5. Set the options: **Include centre cell in its own window** (leave ticked to match the paper), **Standardize compositions before clustering** (§18.2), **Sample multiple k-means seeds (more reproducible)** (leave ticked), **Show enrichment heatmap after run**.
+6. **Pixel size** (µm/pixel, optional) is filled in from the image calibration. For uncalibrated images, set it if you want the radius in µm.
+7. For project scope, check **Sample windows for fit** (default 50,000) and **Parallel workers** (default: number of CPU cores minus 1, up to 8; see §18.6).
+8. Click **Run**. The log shows progress. In project scope, each image logs a `sampled …` line and then a `CN assigned …` line; lines from different workers are mixed together.
 
 ### 18.5 The enrichment heatmap — reading, naming, merging
 
-If **Show enrichment heatmap** is on (or click **Show heatmap** later), you get the CN-by-cell-type enrichment map:
+The CN-by-cell-type enrichment heatmap opens after a run if **Show enrichment heatmap after run** is ticked, or when you click **Show heatmap**:
 
-- **Rows** = CNs (with cell counts and % of all cells); **columns** = cell types.
-- **Numbers** = each CN's mean composition fraction (**Show mean fractions**).
-- **Colour = z-score across each row** — it highlights the type a CN is *relatively enriched* for, so a rare population lights up bright red even at a low absolute fraction. Read the colour (what defines the CN) and the number (how much of it there is) together.
+- **Rows** = CNs, with cell counts and % of all cells. **Columns** = cell types.
+- **Numbers** = each CN's mean fraction of each cell type (shown when **Show mean fractions** is ticked).
+- **Colour** = z-score of each cell type across the CNs. Red means more of that cell type than in the other CNs, and blue means less, so a cell type that is low in absolute terms but higher than in other CNs is still shown in red. Read the colour (which type defines the CN) together with the number (how much of it there is).
 
 ![CN enrichment heatmap for a 10-CN project run](doc_images/cn_enrichment_heatmap_10_CN_whole_project_500k.png)
 
-*A finished 10-CN fit across a 42-image project. This is the main **outcome** you interpret. Reading a few rows shows what you typically get: **CN 8** (32.0% of all cells, tumour fraction 0.96) and **CN 1** (19.6%, 0.82) are the tumour bulk — the large, dominant architecture. **CN 4** (0.93 "Other") is stroma/background. The small, immune-defined rows are the biology you were after: **CN 5** (1.6%) is a TNFR2⁺ CD4 niche (0.33), **CN 7** (1.4%) an activated-CD8 pocket (0.26), and **CN 10** (2.8%) a Treg / activated-CD4 mix. Notice the split of outcomes: a raw-fraction fit like this resolves the dominant tumour/stroma structure cleanly but spreads it across several near-duplicate tumour CNs (1, 2, 8, 9) — the redundancy you collapse by giving them the same name (below), or avoid by ticking **Standardize compositions** to sharpen the rare immune niches instead (§18.2).*
+*A 10-CN result for a whole project. CN 8 and CN 1 are mostly tumour (32% and 20% of cells). CN 4 is stroma/other. CN 5, 7 and 10 are small immune-rich neighbourhoods (1–3% of cells). CNs 1, 2, 8 and 9 are all tumour-dominated; give them the same name to merge them (below).*
 
-**Name / merge:** type a name next to each CN and click **Apply names**. This writes two things to every cell, non-destructively:
-
-- **`CN Class`** — the **name** you typed (e.g. "tumour"), as a **text label in the cell's metadata**. QuPath measurements can only hold numbers, so the readable name lives in the metadata map, where it appears as a text column in the detection table and in cell-table exports. Empty-window cells get `Unassigned`.
-- **`CN Class code`** — a numeric code (1..m) for the same grouping, which is what the **Color by: CN Class** overlay uses (a colour map needs a number).
-
-**Giving two CNs the same name merges them** under one name and one code — the intended way to collapse the redundant CNs that a high **Number of CNs** produces (e.g. name three tumour-dominated CNs all "Tumour"). Merging only affects `CN Class` / `CN Class code`; the raw `CN` measurement keeps every original cluster id (1..k).
-
-**Where the results are stored.** All three outputs are written per cell and are **non-destructive** — none of them touch the cell's QuPath classification (`getPathClass()`), so your trained phenotypes are untouched. They appear as columns in the detection measurement table and in cell-table exports (§[12.1](exporting.md#121-cell-table-export)):
+**Name / merge:** type a name next to each CN and click **Apply names**. Results appear as columns in the detection measurement table and in cell-table exports (§[12.1](exporting.md#121-cell-table-export)). None of them change cell classifications.
 
 | Result | Written when | Stored as | Key | Values |
 |---|---|---|---|---|
 | Raw cluster id | **Run** | numeric **measurement** | `CN` | 1..k (empty-window cells = `-1`) |
 | Named class (readable) | **Apply names** | text **metadata** string | `CN Class` | the name you typed (empty-window cells = `Unassigned`) |
-| Named class (numeric) | **Apply names** | numeric **measurement** | `CN Class code` | 1..m (drives the *Color by: CN Class* overlay) |
+| Named class (numeric) | **Apply names** | numeric **measurement** | `CN Class code` | 1..m (used by the *Color by: CN Class* overlay) |
 
-> The human-readable `CN Class` lives in the cell **metadata** map (not the measurement list) because QuPath measurements can only hold numbers. In cell-table exports it comes through as a text column — make sure to tick it in the export column chooser, as metadata columns are listed after the numeric measurements.
+Giving two CNs the same name merges them. Only `CN Class` and `CN Class code` change; `CN` keeps the original cluster numbers. `CN Class` is stored as text in the cell's metadata, so in *Export → Cell Table...* you must tick it in the column list. It is listed after the numeric measurements.
 
-> **Saving & scope.** In **project scope**, Apply names is **cohort-wide**: it streams every image from the run (in parallel, reusing the **Parallel workers** count), writes `CN Class` / `CN Class code` to each cell from its saved `CN` id, and **saves every image** — so the whole cohort gets consistent, named classes in one click. The open image is updated live and saved too; the log streams per-image progress. In **current-image scope** it writes to the open image only and does **not** auto-save — press **Ctrl+S** to persist.
+> **Saving.** In project scope, **Apply names** updates and saves every image from the run, using the **Parallel workers** count. The open image is updated and saved too. In current-image scope it updates only the open image and does not save it; press **Ctrl+S** to save.
 
-**Export:** **Export as PNG…** saves the heatmap; **Export CN frequencies CSV…** saves the sample-by-CN frequency table — the key output for cohort analysis and for checking whether a CN's abundance tracks your biological groups (signal) or your staining batches (a batch effect to rule out).
+**Export:** **Export as PNG…** saves the heatmap. **Export CN frequencies CSV…** saves one row per CN: cell count, fraction of all cells, diversity, and the mean fraction of each cell type. For CN fractions per image, export the cell table (§[12.1](exporting.md#121-cell-table-export)) with the `CN` or `CN Class` column and count the cells in each image. Use these to check whether CN frequencies follow your biological groups or your staining batches.
 
 ### 18.6 Parallel workers (project scope) — performance
 
-Both cohort passes (sample and assign) process images **in parallel**, one worker per image, controlled by the **Parallel workers** spinner (defaults to `min(8, cores − 1)`, up to your core count). Because each image is an independent read → compute → (for the assign pass) write+save, this scales close to linearly until you hit disk or memory limits.
+**Parallel workers** (default: number of CPU cores minus 1, up to 8) sets how many images are processed at once, in both the sample and the assign pass. Each worker loads one whole image's cells, so memory use rises with the worker count.
 
-- **Each worker loads a full image's cell hierarchy**, so higher worker counts are faster but use more memory. Dial it back on very large slides (hundreds of thousands of cells each).
-- **Many small images:** raise the worker count.
-- **A few very large images:** 2–4 workers is often the sweet spot.
-- Results are **deterministic regardless of worker count** — each image is sampled with its own fixed seed, so the fit is reproducible run to run (and with **Sample multiple k-means seeds** on, the k-means fit itself is stabilised too — §18.2).
+- For images with hundreds of thousands of cells, use 2–4 workers.
+- For many small images, use more workers.
+- Results are the same for any worker count.
 
 ### 18.7 Viewer overlays
 
-Three one-click, non-destructive recolourings drive the viewer from the last run (they map measurements via QuPath's overlay mapper; cells with `CN = -1` keep their phenotype colour):
+Three buttons recolour the viewer using the last run. They do not change the cells. Cells with `CN = -1` keep their classification colour.
 
-- **Color by: Neighborhood (CN)** — a distinct, **adjacency-aware** categorical palette (spatially-touching CNs get maximally contrasting colours so regions are easy to tell apart).
-- **Color by: CN Class** — colours the merged, named classes after you **Apply names** (driven by the numeric `CN Class code`).
-- **Color by: diversity** — colours each cell by its neighbourhood's cell-type **Shannon diversity** (0 = one type dominates, 1 = an even mix), useful for finding mixing zones and interfaces.
+- **Color by: Neighborhood (CN)**: one colour per CN. CNs that touch in the tissue get contrasting colours.
+- **Color by: CN Class**: one colour per named class, after **Apply names** (uses `CN Class code`).
+- **Color by: diversity**: colours each cell by the Shannon diversity of the cell types in its window (0 = one cell type, 1 = an even mix). Use it to find mixed zones and interfaces.
 
-Each toggle flips back to the classification colouring on a second click, and **closing the dialog automatically reverts the viewer to phenotype classifications** (so an active CN overlay never lingers and hides your classes).
+Click a button again to return to classification colours. Closing the dialog also returns the viewer to classification colours.
 
 ![CN overlay in the viewer alongside the enrichment heatmap and name/merge panel](doc_images/cn_cluster_visualisation.png)
 
-*The **Color by: Neighborhood (CN)** overlay painting the whole slide by micro-environment, next to the enrichment heatmap and the **Name / merge neighborhoods** panel. The adjacency-aware palette makes the tissue architecture legible at a glance — the yellow tumour bulk, the red/blue stromal and interface bands threading between the tumour islands, and the scattered immune pockets — turning the abstract cluster ids into a map you can read against the H&E-like structure. Type names into the panel on the right and click **Apply names** to collapse the redundant CNs and drive the **Color by: CN Class** overlay.*
+*The **Color by: Neighborhood (CN)** overlay, with the enrichment heatmap and the **Name / merge neighborhoods** panel. Neighbouring CNs get contrasting colours.*
 
 ### 18.8 Tips & cautions
 
-- **CN frequency varying across samples is usually the signal**, not noise — it's the per-patient readout you're after. But first rule out that it's technical: since the CN input is your phenotype labels, any **staining/batch effect in classification propagates straight into CN frequencies**. Check the frequencies CSV against your groups vs your batches.
-- **Watch for CN definitions encoding sample identity** — if a CN's cells come almost entirely from one or two images, that cluster may reflect an outlier slide rather than shared biology. Sub-2% CNs are the most fragile; confirm they replicate before interpreting.
-- **Run the classifier first.** CNs are only as good as the phenotypes underneath them.
-- The **radius** window makes density matter (dense regions have bigger windows); **kNN** normalises for density (every window has the same fixed number of cells). Choose deliberately.
+- **Check that differences in CN frequency are biological.** Differences between samples are usually the result you are looking for. But CNs are built from your cell classifications, so any staining or batch effect in classification carries into the CN frequencies. Compare per-image CN fractions between your groups and between your batches.
+- **Check CNs that come mostly from one or two images.** Such a CN may reflect one unusual slide rather than shared biology. CNs with less than 2% of cells are the least stable; confirm that they appear again (for example in another cohort or a repeat run) before you interpret them.
+- **Run the classifier first.** CN results depend on the quality of the cell classifications.
+- **within radius** vs **k nearest neighbours**: with **within radius**, dense regions have more cells per window. With **k nearest neighbours**, every window has the same number of cells, so density does not change window size. Choose the mode that suits your question.
 
 ---

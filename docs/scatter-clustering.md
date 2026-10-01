@@ -1,378 +1,308 @@
 # Cell scatter plot — clustering & gating
 
-**Extensions → SP Classify → Scatter Plots and Clustering...** opens an interactive
-2D scatter plot for **unsupervised exploration**: cells are clustered — by
-k-means or, optionally, graph-based Leiden clustering (§[11.6](#116-clustering-method-k-means-vs-leiden))
-— on their marker measurements and projected into a 2D embedding so you can see,
-label, and sub-cluster populations. This is independent of the trained
-classifier — it writes to QuPath classifications, not the extension's training labels.
+**Extensions → SP Classify → Scatter Plots and Clustering...** opens a scatter plot
+for unsupervised clustering. Cells are clustered on their marker measurements with
+k-means or Leiden (§[11.6](#116-clustering-method-k-means-vs-leiden)) and drawn on a
+2D PCA or UMAP plot. You can then name the clusters as QuPath classes. This does not
+use or change the trained classifier or its training labels.
 
-When you open it you first pick which measurements to embed (a *Select
-Measurements for Scatter Plot* dialog). The window then computes an initial
-embedding on a background thread.
+When the window opens, pick the measurements to use in the *Select Measurements for
+Scatter Plot* dialog. The window then loads the open image's cells (up to the
+**Sample:** cap, default 50,000) and shows *"… cell(s) loaded — click “Recompute” to
+cluster."* Click **Recompute** to cluster and draw the plot.
 
-> Clustering applies any **feature normalisation** you've configured
-> (§[4.2](setup.md#42-clustering-normalisation)) — this is clustering-only (the classifier uses raw
-> values) — then z-scores each marker over the active cells. The normalizer is captured
-> when the window opens; reopen the plot after changing it.
+> Clustering uses the normalisation set in **Clustering Normalisation**
+> (§[4.2](setup.md#42-clustering-normalisation)). The classifier always uses raw values. Each
+> marker is then z-scored over the cells being clustered. Set the normalisation before
+> you open this window: a plot keeps the normalisation it was built with, and
+> reopening it from the menu or clicking **New clustering session** does not update it.
 
 ### 11.1 Controls
 
 **Top row**
-- **Embedding** — `PCA` (fast, linear) or `UMAP` (slower, non-linear, separates
-  overlapping populations better). The embedding is **for visualisation only**;
-  k-means always clusters in the original marker space, not on the 2D coords.
-- **Full UMAP** (checkbox, UMAP only) — by default UMAP *plots* a 20,000-cell
-  sample for responsiveness (k-means still clusters **all** cells; the status bar
-  shows e.g. *"309,584 clustered · 19,432 plotted"*). Tick **Full UMAP** to embed
-  every cell instead — much slower and more memory-hungry on large images, but
-  nothing is left out of the plot. PCA always plots all cells.
-- **Method** — `k-means` (default) or `Leiden`. Choosing Leiden replaces
-  **Clusters (k)** with a **Resolution** control and a reproducibility toggle —
-  see §[11.6](#116-clustering-method-k-means-vs-leiden).
-- **Clusters (k)** — number of k-means clusters (2–50). The legend shrinks to
-  keep all clusters visible and clickable. *k-means only* — Leiden decides its
-  own cluster count from the resolution instead (§11.6).
-- **Recompute** — re-fit the selected clustering method + the embedding on the
-  current rows (the open image, or the project sample). It does **not**
-  re-sample — use **Images…** in project scope for that.
-- **Scope: Current image / Project** — a toggle. *Current image* (default)
-  clusters every cell of the open image with full viewer interaction. *Project*
-  fits **one** k-means on a sample pooled across images you choose and drives the
-  same interactive plot, so you can name and assign clusters across the whole
-  cohort — see §[11.5](#115-project-wide-clustering-across-images). Switching to
-  *Project* reveals an **Images…** button and a **Sample:** spinner.
-- **Re-sample** — draw a fresh random sample of cells at the current **Sample:**
-  cap and re-fit (project scope; in current-image scope it re-draws the plotted
-  subsample). Unlike **Recompute**, which re-fits on the *existing* rows.
-- **New clustering session** (next to Re-sample) — start over from scratch:
-  re-opens the *Select Measurements* dialog so you can pick a different marker
-  set or scope, then builds a fresh plot. You only need this to **change the
-  inputs** — the plot now **remembers its clustering between closing and
-  reopening** the window (reopen it from the menu and your clusters, scope and
-  fit are restored as they were, with no re-clustering), so *New clustering
-  session* is the deliberate way to discard that and begin again.
+- **Embedding** — `PCA` (fast) or `UMAP` (slower; often separates overlapping
+  populations better). The embedding only positions the points on the plot.
+  Clustering always uses the marker values, not the 2D coordinates.
+- **Full UMAP** (UMAP only) — by default UMAP plots a random 20,000 of the loaded
+  cells. All loaded cells are still clustered, and the status bar shows both counts,
+  e.g. *"50,000 clustered · 19,432 plotted"*. Tick **Full UMAP** to plot every loaded
+  cell. This is slower and uses more memory. PCA always plots every loaded cell.
+- **Method** — `k-means` (default) or `Leiden` (§[11.6](#116-clustering-method-k-means-vs-leiden)).
+- **Clusters (k)** — number of k-means clusters, 2–50, default 8. Shown only when
+  Method = k-means. Leiden uses **Resolution** instead.
+- **Sample multiple seeds** — runs the clustering 10 times from different starting
+  points with a fixed seed and keeps the best result. Repeated runs with the same
+  settings then give identical clusters. Applies to k-means and Leiden. When unticked,
+  one faster run is made, and cluster numbers (sometimes boundaries) can change
+  between runs.
+- **Reduce dims (PCA)** (on by default) and **PCA comps:** (2–500, default 50) —
+  when more than 50 measurements are selected, clustering runs on this number of
+  principal components instead of on every measurement. This stops a marker that has
+  many measurement columns (mean, median, nucleus, cytoplasm, etc.) from dominating
+  the result. With 50 or fewer measurements it has no effect. When PCA is used, the
+  status bar shows e.g. *"PCA: 240 → 50 comps, 87.3% variance"*. The heatmap in the
+  assignment dialog (§11.3) still shows the original marker values.
+- **Cluster all cells / Transfer from sample** — shown only when Method = Leiden and
+  Scope = Project (§[11.5](#115-project-wide-clustering-across-images)).
+- **Recompute** — runs the clustering and the embedding on the cells currently
+  loaded. It does not draw new cells (use **Re-sample** for that). In project scope,
+  if no sample has been drawn yet, Recompute draws one first and then clusters it.
 
-**Filter row (this is the gating row)**
-- **Annotation** — type a keyword to cluster only cells whose centroid falls
-  inside an annotation whose name (or classification) contains that text. Blank =
-  all cells. Same membership test as Review mode. *Current-image scope only* — it
-  is disabled in project scope, since annotations belong to one image's hierarchy.
-- **Within class** — restrict clustering to cells whose current QuPath
-  classification contains this text (pick from the dropdown or type). Works in
-  **both** scopes: in current-image scope it combines with the annotation filter;
-  in project scope it filters the pooled sample by each cell's carried class, and
-  the cohort **Assign** is then restricted to that class too (so a sub-clustering
-  only rewrites cells of that class).
-- **Cluster markers** — a checklist of the embedded markers, all ticked by
-  default. Untick markers to cluster on a focused panel (e.g. immune markers
-  only). Values are **re-standardised over the active subset** each run, so
-  sub-clustering scales to the subpopulation rather than the whole image. At
-  least 2 markers must be ticked.
+**Scope row**
+- **Scope: Current image / Project** — *Current image* (default) clusters cells from
+  the open image. If the image has more cells than the **Sample:** cap, a random
+  subset of that size is used, and the status bar shows *"Subsampled X of Y cell(s)"*.
+  *Project* clusters a sample pooled from several images and adds an **Images…**
+  button (§[11.5](#115-project-wide-clustering-across-images)).
+- **Images…** (project scope only) — choose which project images to sample. This
+  clears the plot and does not sample. Click **Re-sample** afterwards.
+- **Sample:** (1,000–5,000,000, default 50,000) — the maximum number of cells to
+  load. Applies in both scopes. Press Enter or click **Re-sample** to apply a new
+  value.
+- **Re-sample** — draws a new random set of cells up to the **Sample:** cap: from the
+  chosen images in project scope, or from the open image in current-image scope. It
+  does not cluster. Click **Recompute** afterwards.
+- **New clustering session** — reopens the *Select Measurements* dialog so you can
+  choose a different set of measurements, then starts a new plot. If you only close
+  the window and reopen it from the menu, the previous clusters, scope and settings
+  are restored without re-clustering (in current-image scope, only when the same
+  image is open).
+
+**Filter row (gating)**
+- **Annotation** — enter one or more comma-separated keywords (e.g. `Tumour, Stroma`).
+  Only cells whose centroid lies inside an annotation whose name or class contains a
+  keyword are clustered. Leave blank to use all cells. In current-image scope, press
+  Enter to re-run. In project scope each image is filtered by its own annotations
+  when the sample is drawn, so click **Re-sample** after changing the keywords.
+- **Within class** — cluster only cells whose current QuPath classification contains
+  this text (pick from the dropdown or type). Works in both scopes and combines with
+  the annotation filter. In project scope, **Assign Clusters…** then changes only
+  cells of that class, so a sub-clustering only reclassifies that population.
+- **Cluster markers** — a checklist of the selected measurements, all ticked by
+  default. Untick markers to cluster on a smaller panel (e.g. immune markers only).
+  Values are z-scored again over the cells being clustered on each run, so a
+  sub-clustering is scaled to that subpopulation, not to the whole image. Tick at
+  least 2 markers.
+
+**Colour cells in image row**
+- **By cluster** — colours every cell in the open image by its nearest cluster and
+  writes a numeric `Cluster` measurement. If **Within class** is set, only cells of
+  that class are coloured. It does not change the cell's
+  classification. The colouring is removed when the window closes. In project scope
+  the button reads **By cluster (all images)**: it writes `Cluster` to every cell in
+  every selected image and saves each image.
+- **By classification** — returns the viewer to QuPath's class colours.
 
 **Bottom row**
-- **Colour by** — `CLUSTER` (k-means or Leiden cluster id), `CLASS`
-  (current/predicted class), or `MARKER` (single-marker intensity gradient; pick
-  the marker alongside).
-- **Select: Box / Lasso** — drag on the plot to select those cells (in the viewer
-  in current-image scope; a plot-only highlight in project scope — see §11.2).
-- **Apply Clusters… / Assign Clusters…** — see §11.3. The button's label follows
-  the scope.
-- **Export PNG…** — save the current plot.
+- **Colour by** — `CLUSTER` (cluster number), `CLASS` (current class), or `MARKER`
+  (one marker's intensity; pick the marker in **Marker:**).
+- **Select: Box / Lasso** — drag on the plot to select those cells (§11.2).
+- **Apply Clusters… / Assign Clusters…** — name clusters as classes (§11.3). The
+  label is **Apply Clusters…** in current-image scope and **Assign Clusters…** in
+  project scope.
+- **Export PNG…** — saves the current plot as a PNG.
+
+> If the status bar shows *"(UMAP unavailable — showing PCA)"*, UMAP could not start
+> on this computer. Restart QuPath with the launch option
+> `--add-opens=java.base/java.lang=ALL-UNNAMED` to enable it.
 
 ### 11.2 Selecting cells
 
-- **Box / Lasso** drag selects the enclosed points.
-- **Click a cluster in the legend** (CLUSTER colour mode) selects **all** that
-  cluster's cells — the cursor turns to a hand over clickable legend rows.
+- Drag a **Box** or **Lasso** to select the enclosed points.
+- In `CLUSTER` colour mode, click a cluster in the legend to select all its cells.
 
-In **current-image scope** selection is two-way: drag/click selects the cells in
-the QuPath viewer, and selecting cells in the viewer outlines them on the plot.
+In **current-image scope**, selection works both ways: selecting points on the plot
+selects those cells in the QuPath viewer, and selecting cells in the viewer outlines
+them on the plot.
 
-In **project scope** the rows are pooled from images that aren't all open, so
-there is no live cell to select — drag/click instead **highlights** the points on
-the plot (handy to read a region's class or marker intensity). It does not change
-the viewer selection.
+In **project scope**, the sampled cells come from images that are not open, so
+selecting points only highlights them on the plot. Use this to read the class or
+marker intensity of a region. The viewer selection does not change.
 
 ### 11.3 Apply Clusters / Assign Clusters — assign classes to clusters
 
-The same dialog serves both scopes. It shows one row per non-empty cluster —
-colour swatch, cell count, a **per-cluster marker heatmap** (mean z-scored
-intensity: **red = high, blue = low** — the cluster's phenotype fingerprint, so
-you can name it from its high markers), and a dropdown to map the cluster to an
-existing class, a newly typed class, or **— skip —**.
+Both scopes use the same dialog. It shows one row per non-empty cluster with: a
+colour swatch, the cell count, a heatmap of the cluster's mean z-scored value for
+each marker (red = high, blue = low), and a dropdown. Use the high markers to decide
+the name. In the dropdown, pick an existing class, type a new class name, or choose
+**— skip —**.
 
-You can manage classes without leaving the dialog: **Manage Classes…** opens
-[Class Control](setup.md#43-create-classes--class-control) (add / delete / merge) and **Refresh classes**
-re-reads the updated class list into every dropdown. (The dropdowns are also
-editable — typing a new name creates that class on assign.)
+To edit classes without closing the dialog, click **Manage Classes…** to open
+[Class Control](setup.md#43-create-classes--class-control) (add, delete, merge), then click
+**Refresh classes** to reload the class list into every dropdown. A class name typed
+into a dropdown is created when you assign.
 
 ![Assigning classes to clusters](doc_images/assign_parent_clusters.png)
 
-- **Current-image scope (Apply Clusters…)** — after you confirm (a second dialog
-  shows the exact cell count), the chosen classes are written to those cells'
-  **classification** on a background thread. Skipped/unmapped cells are untouched.
-- **Project scope (Assign Clusters…)** — see §[11.5](#115-project-wide-clustering-across-images);
-  the mapping is streamed and saved across every selected image.
+- **Current-image scope (Apply Clusters…)** — a second dialog shows the number of
+  cells that will change. After you confirm, the chosen classes are written to those
+  cells. Skipped clusters are not changed. Only the loaded cells are classified (at
+  most the **Sample:** cap). To classify every cell in a large image, set **Sample:**
+  to at least the image's cell count and click **Re-sample**, then **Recompute**,
+  before applying.
+- **Project scope (Assign Clusters…)** — see §[11.5](#115-project-wide-clustering-across-images).
 
-Either way this replaces any existing class on the mapped cells; it does **not**
-touch the extension's ground-truth training labels.
+In both scopes, the new class replaces any existing class on the assigned cells. The
+extension's training labels are not changed.
 
 ### 11.4 Cluster-within-clusters (hierarchical gating)
 
-The filter row lets you gate, then re-cluster inside a gate — the standard
-two-level phenotyping workflow:
+Use the filter row to cluster inside one population (two-level phenotyping):
 
-1. Cluster all cells on all markers → **Apply Clusters** → assign the cardinal
-   classes (e.g. **Tumour / Immune / Other**).
-2. Set **Within class: Immune**, open **Cluster markers** and tick only the
-   immune markers (CD45, CD3d, CD8A, CD4, CD20, PD1, FOXP3) → **Recompute**.
-   Only immune cells re-cluster, on immune markers, re-standardised within the
-   immune subset.
-3. **Apply Clusters** again to name the sub-populations — type derived names like
+1. Cluster all cells on all markers → **Apply Clusters…** → assign the main classes
+   (e.g. **Tumour / Immune / Other**).
+2. Set **Within class: Immune**, open **Cluster markers** and tick only the immune
+   markers (CD45, CD3d, CD8A, CD4, CD20, PD1, FOXP3) → **Recompute**. Only immune
+   cells are clustered, on immune markers, z-scored within the immune cells.
+3. Click **Apply Clusters…** again to name the subpopulations. Type names in the form
    `Immune: CD8 T` (QuPath treats `Parent: Child` as a derived class).
 
 ![Sub-clustering within the Immune class](doc_images/immune_sub_cluster.png)
 
-Repeat to go deeper. The status bar reports the active scope and marker count,
-e.g. *"…12,840 cells in class "Immune" · 7/24 markers"*.
-
-> **Native libraries / `--add-opens`.** PCA and UMAP use native math libraries
-> (OpenBLAS / ARPACK via JavaCPP). The extension opens the required JVM module access
-> automatically at startup, so no launch flags are normally needed. If that ever
-> fails on a locked-down JVM, the plot falls back to PCA and the status bar
-> suggests launching QuPath with
-> `--add-opens=java.base/java.lang=ALL-UNNAMED`.
+Repeat for further levels. The status bar shows the active filter and marker count,
+e.g. *"(12,840 cells in class “Immune”) · 7/24 markers"*.
 
 ### 11.5 Project-wide clustering across images
 
-To cluster a **whole cohort consistently**, flip the **Scope** toggle to
-**Project**. The extension fits **one** model on a sample pooled across the
-images you choose, then (when you assign) maps *every* cell in *every* selected
-image to that same cohort clustering — so cluster 3 means the same phenotype in
-every image (unlike clustering each image separately, which gives non-comparable
-cluster ids). It all happens in the same window, so every tool — colour-by-marker,
-within-class gating, the cluster-marker subset, the centroid heatmap — is
-available for naming the cohort's clusters.
-**k-means** assigns by nearest cohort centroid; **Leiden** assigns by kNN label
-transfer against the labelled fitted sample — see §[11.6](#116-clustering-method-k-means-vs-leiden).
+Project scope fits one clustering on a sample of cells pooled from the images you
+choose, then applies it to every cell in those images. Cluster 3 then means the same
+population in every image. (If you cluster each image separately, the cluster numbers
+cannot be compared between images.) All controls in §11.1 work in project scope.
+Selection on the plot only highlights points (§11.2).
 
 **Entering project scope**
 
-1. Click **Project**. An image picker opens — choose which project images to
-   sample (defaults to all). Cancel to stay on the current image.
-2. The extension streams each image and pools a bounded random sample (the **Sample:**
-   spinner, default 50,000, drawn evenly per image), then fits k-means and draws
-   the plot. The status bar reads e.g. *"Project sample (8 images)"*.
+1. Click **Project**. Choose the images to sample (all are selected by default).
+   Click Cancel to stay on the current image.
+2. Click **Re-sample**. The extension reads each image and takes up to **Sample:** ÷
+   (number of images) random cells from each, up to 50,000 in total by default. The
+   status bar shows *"Sampled X cell(s) across N image(s)"*.
+3. Click **Recompute** to cluster the sample and draw the plot. (Clicking
+   **Recompute** straight after step 1 does steps 2 and 3 together.)
 
-The sample only bounds the **fit** — 50,000 cells is statistically ample to place
-stable centroids (more barely move them but cost time). **Every** cell is still
-classified later in the assignment pass, so memory stays flat regardless of
-project size.
+The sample is only used to fit the clusters. When you assign, every cell in every
+selected image is assigned, one image at a time, so the number of images does not
+limit memory use. Raising **Sample:** above 50,000 makes the fit slower.
 
 **Working with the cohort sample**
 
-The plot behaves like the single-image one, with the project caveats already
-noted: the Annotation filter is disabled (§11.1), and box/lasso/legend selection
-highlights on the plot only (§11.2). Everything else applies:
-
-- **Colour by → MARKER** to read which clusters are high in which marker.
-- **Within class** to sub-cluster one population across the cohort (the assign is
-  then restricted to that class — §11.1).
-- **Cluster markers** to fit on a focused panel.
-- **Recompute** re-fits on the existing sample (fast). To draw a fresh sample —
-  different images, or a new **Sample:** size — click **Images…**.
+- **Colour by → MARKER** shows which clusters are high in which marker.
+- **Within class** sub-clusters one population across all images. **Assign
+  Clusters…** then changes only cells of that class.
+- **Cluster markers** fits on a smaller panel.
+- **Recompute** clusters the current sample again. To use different images, click
+  **Images…** and then **Re-sample**. To change the sample size, change **Sample:**
+  and click **Re-sample**. Then click **Recompute**.
 
 **Assigning across the cohort**
 
-Click **Assign Clusters…**. The shared assignment dialog (§11.3) shows the
-per-cluster mean marker heatmap and a class dropdown per cluster. On confirm,
-The extension streams each selected image, assigns all matching cells to their cluster
-(nearest centroid for k-means; kNN label transfer against the fitted sample for
-Leiden — §[11.6](#116-clustering-method-k-means-vs-leiden)), writes the mapped
-classes, and **saves each image**, with progress in the status bar.
+Click **Assign Clusters…**. The dialog from §11.3 opens. After you confirm, each
+selected image is opened in turn, every matching cell is given its cluster's class,
+and the image is saved. Progress is shown in the status bar. (For how cells outside
+the sample are assigned, see §[11.6](#116-clustering-method-k-means-vs-leiden).)
 
-> **Measurement scaling & batch effects.** Clustering applies the extension's feature
-> normalisation (§[4.2](setup.md#42-clustering-normalisation)) — arcsinh / sqrt, a **clustering-only**
-> step (the classifier uses raw values) — then z-scores each marker over the active cells
-> at fit time. So if you've configured normalisation, it shapes the clusters and
-> the colour-by-marker view too. (The normalizer is captured when the window
-> opens; change it via *Clustering Normalisation* and reopen the plot to pick it up.)
+> **This changes every selected image.** Assigning replaces the class on the assigned
+> cells and saves each image. Training labels are not changed. The open image updates
+> immediately.
 
-**Leiden cohort modes: "Cluster all cells" vs "Transfer from sample"**
+> **Annotation filter.** In project scope the **Annotation** filter limits which
+> cells are sampled. With k-means, or Leiden **Transfer from sample**, **Assign
+> Clusters…** and **By cluster (all images)** assign every cell in each image that
+> passes **Within class**, including cells outside the matching annotations.
 
-When **Method = Leiden** and **Scope = Project**, a radio pair appears next to the
-Method selector (hidden for k-means, and hidden in current-image scope):
+> **Staining differences between images.** Normalisation is applied per marker, not
+> per image. If one slide is stained brighter than the others, its cells can fall
+> into different clusters. Check the per-image intensity distributions before
+> pooling.
 
-- **Cluster all cells** (default) — the exact, true-scanpy `sc.tl.leiden`-style
-  mode: **every** cell across every selected image is pooled into one feature
-  matrix, one approximate-NN (HNSW) kNN graph is built over the whole cohort, a
-  **single** CWTS Leiden partition runs over that entire graph, and each cell's
-  community label is written back to its source image by its stable cell UUID
-  (not by iteration order — safe even if a second read of an image returns cells
-  in a different order). This genuinely clusters every cell, rather than
-  approximating the rest of the cohort from a sample.
-- **Transfer from sample** — the fast/approximate mode retained from the previous
-  release: Leiden fits once on the pooled sample, then every other cell is
-  assigned by kNN label transfer against that labelled sample (`sc.tl.ingest`-style
-  — see §[11.6](#116-clustering-method-k-means-vs-leiden)).
+**Leiden in project scope: Cluster all cells / Transfer from sample**
 
-Clicking **Assign Clusters…** / **By cluster (all images)** with **Cluster all
-cells** selected runs the two-pass all-cells driver instead of the transfer path:
+With **Method = Leiden** and **Scope = Project**, two options appear next to
+**Method**:
 
-- **Soft cell-count ceiling.** Before pooling starts, the extension does a quick
-  count-only pass over the selected images to estimate the total pooled cell
-  count. If that estimate is above a configurable ceiling (50,000,000 cells by
-  default), an extra confirm dialog warns you before the run begins — it warns,
-  it does not hard-block.
-- **Per-phase progress.** The status bar reports each phase as it happens —
-  *"Pooling 12/40 images"* → *"Building kNN graph…"* → *"Running Leiden…"* →
-  *"Writing 12/40 images"* — followed by the run's outcome.
-- **ANN recall gate.** The HNSW graph build is checked at runtime against an
-  exact nearest-neighbour reference on a small sample; the status line reports
-  the measured recall (e.g. *"ANN recall 0.982 — passed"*) when the driver
-  exposes it. If recall cannot reach the required 95% after auto-tuning, the run
-  **aborts with no `Cluster` labels written at all** — an actionable error
-  explains why; existing `Cluster` measurements from a previous successful run
-  are left untouched.
-- **Cancel.** A **Cancel** button appears only during an all-cells run. Cancelling
-  stops the write pass before its next image — images already written keep their
-  `Cluster` measurement (no rollback); the final status line reports how many
-  images were, and were not, written.
-- **Legend re-sync.** After a successful (non-cancelled, non-aborted) all-cells
-  write, the scatter legend and the open image's overlay re-sync to the **final
-  all-cells cluster count** — the number Leiden actually found across the whole
-  cohort — not the interactive preview's (subsample-based) cluster count. The
-  interactive plot itself always stays subsample-based for responsiveness; only
-  the persisted `Cluster` measurement (and, after the write, the legend/overlay)
-  reflects the full all-cells run.
+- **Cluster all cells** (default) — clusters every cell in every selected image
+  together, not just the sample. This is slower and uses more memory.
+- **Transfer from sample** — clusters only the sample. Each other cell takes the most
+  common cluster among its 15 nearest cells in the sample. This is faster.
 
-Single-image Leiden (current-image scope, and the interactive project-scope
-preview fit) also builds its kNN graph through the same HNSW approximate-NN index
-now, rather than a brute-force scan — this is transparent (no extra control) and
-only matters if you happen to hit the same recall gate on a single image, in
-which case the status bar reports it and asks you to try more cells or different
-markers.
+With **Cluster all cells**, the full run is started by **By cluster (all images)**:
 
-> **Fidelity vs stock scanpy.** The extension's Leiden clustering (both cohort modes
-> and the single-image path) is a close, but not bit-identical, match to running
-> `sc.tl.leiden` in Python. Two remaining documented gaps (a third — PCA — is now
-> implemented, see below):
->
-> 1. **Quality function** — the bundled CWTS Leiden library optimises the
->    **Constant Potts Model (CPM)**, not scanpy's default **modularity**
->    (RBConfiguration). The `Resolution` control behaves like the familiar
->    scanpy/leidenalg knob (association-strength normalisation keeps it on the
->    same rough scale), but is not numerically identical to a modularity run.
-> 2. **Edge weighting** — the extension weights the kNN graph by **Jaccard
->    similarity of shared nearest neighbours (SNN)**, not scanpy's **UMAP
->    fuzzy-simplicial-set connectivities**.
->
-> Neither is expected to change population-level conclusions for multiplex-
-> imaging marker panels, but an external `sc.tl.leiden` run on the same data is
-> not guaranteed to reproduce identical cluster boundaries.
+1. Click **Recompute** to preview the clusters on the sample.
+2. Click **By cluster (all images)** and confirm. The extension:
+   - counts the cells first. If there are more than 50,000,000, it asks you to
+     confirm again;
+   - shows each step in the status bar: *Pooling 12/40 images → Building kNN graph… →
+     Running Leiden… → Writing 12/40 images*;
+   - writes a `Cluster` measurement to every cell and saves each image.
+     Classifications are not changed;
+   - shows a **Cancel** button. Cancelling stops before the next image. Images
+     already written keep their new `Cluster` values.
 
-> **PCA dimensionality reduction (scanpy `scale → PCA → neighbors` recipe).**
-> Both cohort modes and the single-image path apply a conditional PCA reduction
-> to the z-scored marker matrix *before* building the clustering kNN graph (both
-> k-means and Leiden) — a **"Reduce dims (PCA)"** checkbox (on by default) and a
-> components spinner (default 50) sit next to the Resolution/k controls. Below
-> ~50 active marker columns this is a no-op (a small, curated panel is already
-> low-dimensional — projecting onto ≥ p components is just a lossless rotation),
-> preserving the exact prior small-panel behaviour. Above that threshold — real
-> projects can carry hundreds to 1000+ per-cell measurements (each marker × mean/
-> median/percentile × nucleus/cytoplasm/membrane) — unreduced Euclidean kNN both
-> lets whichever marker happens to have the most measurement columns dominate
-> the distance, and suffers high-dimensional distance concentration; PCA fixes
-> both. The reduction uses the same exact (deterministic, non-randomized) Smile
-> `PCA` eigendecomposition already used for the 2D display embedding, so the
-> reproducible-seed clustering path stays bit-stable. Per-cluster centroids (the
-> Assign-dialog heatmap) and the interpretive marker view are always computed in
-> the **original marker space**, never the PCA space — only the neighbour graph
-> itself is built on the reduced matrix. On the all-cells cohort path, the PCA
-> projection is **fit on a bounded seeded subsample** (like the ANN recall gate's
-> sampling) when the pooled cohort is very large, then applied to every pooled
-> cell — bounding fit cost/memory independent of total cell count. When applied,
-> the status bar/log reports `PCA: {p} → {nComp} comps, {variance}% variance`.
+   When it finishes, the legend, the image colouring and the **Assign Clusters…**
+   dialog show the clusters found across all cells. The plot itself still shows the
+   sample.
+3. Click **Assign Clusters…** to name the clusters. Classes are assigned from the
+   written `Cluster` values.
 
-> **Citing.** Graph-based clustering here uses the **Leiden algorithm** (Traag,
-> Waltman & van Eck, *Sci. Rep.* 2019) and mirrors the **scanpy** scale → PCA →
-> neighbours → Leiden recipe (Wolf, Angerer & Theis, *Genome Biol.* 2018); the
-> scalable kNN graph uses **HNSW** (Malkov & Yashunin, *IEEE TPAMI* 2020). If
-> graph-based clustering is central to your analysis, please cite these — full
-> citations and the bundled-library licenses (CWTS `networkanalysis`, jelmerk
-> `hnswlib-core`) are in the [README acknowledgements](https://github.com/mikemcka/qupath-extension-sp-classify/blob/main/README.md).
+If you click **Assign Clusters…** without step 2, or after a new **Recompute**, cells
+are assigned by transfer from the sample instead.
+
+If the neighbour search is not accurate enough (below 95% recall), the run stops and
+an error dialog says that no `Cluster` measurement was written. Existing `Cluster`
+values are kept. Try different markers or more cells. The same check runs for Leiden
+on a single image or a project sample: if the status bar shows *"Leiden preview: ANN
+recall too low — try more cells / different markers."*, no clusters were made.
+Increase **Sample:** or change the ticked **Cluster markers** and click **Recompute**.
+
+> **Comparison with scanpy.** Results are similar to `sc.tl.leiden` in Python but not
+> identical. This extension uses a different quality function (CPM rather than
+> modularity) and weights the neighbour graph by shared neighbours (Jaccard) rather
+> than UMAP connectivities. The same **Resolution** value can give slightly different
+> cluster boundaries in scanpy.
+
+> **Citing.** If graph-based clustering is central to your analysis, cite the
+> **Leiden algorithm** (Traag, Waltman & van Eck, *Sci. Rep.* 2019), **scanpy** (Wolf,
+> Angerer & Theis, *Genome Biol.* 2018), whose scale → PCA → neighbours → Leiden steps
+> this follows, and **HNSW** (Malkov & Yashunin, *IEEE TPAMI* 2020), used for the
+> neighbour graph. Full citations and the licences of the bundled libraries (CWTS
+> `networkanalysis`, jelmerk `hnswlib-core`) are in the
+> [README acknowledgements](https://github.com/mikemcka/qupath-extension-sp-classify/blob/main/README.md).
 
 ### 11.6 Clustering method: k-means vs Leiden
 
-The **Method** selector (§11.1) switches the clustering algorithm; everything
-else in this section — the embedding, colouring, selection, within-class gating,
-cluster-marker subsetting, and cluster→class assignment — works identically for
-both, because both ultimately produce the same per-cell cluster label array.
+**Method** (§11.1) selects the clustering algorithm. All other controls work the same
+for both methods.
 
-- **k-means** (default) partitions cells into a **fixed** number of clusters (the
-  **Clusters (k)** spinner, 2–50). It assumes clusters are roughly spherical and
-  similarly sized, and you must pick `k` up front.
-- **Leiden** is graph-based community detection — the same family of algorithm
-  used by scanpy, scimap, and SPACEc for single-cell / multiplex-imaging
-  phenotyping (it traces back to PhenoGraph). Instead of a fixed `k`, the extension
-  builds a nearest-neighbour graph over the z-scored marker matrix, weights edges
-  by neighbourhood similarity (Jaccard), and runs the Leiden algorithm — the
-  **number of clusters is decided by the data**, not chosen in advance. This finds
-  non-spherical and unequal-size populations — including rare cell types — that
-  k-means tends to under-resolve or merge into a larger neighbour.
+- **k-means** (default) splits cells into exactly **k** clusters (**Clusters (k)**,
+  2–50, default 8). It works best when populations are of similar size.
+- **Leiden** links each cell to its 15 nearest cells (by marker values) and finds
+  groups of closely linked cells. You set **Resolution** instead of a cluster count,
+  and the number of clusters comes from the data. It is better than k-means at
+  keeping small or unevenly sized populations as separate clusters. This is the
+  method used by scanpy, scimap and SPACEc.
 
 ![Leiden clustering of cells in the scatter plot, coloured by community](doc_images/leiden_clustering.png)
 
 **Controls when Method = Leiden**
 
-- **Resolution** (0.1–3.0, default 1.0) — replaces **Clusters (k)**. Higher
-  resolution finds **more, smaller** communities; lower resolution finds **fewer,
-  larger** ones. There is no fixed cluster count to set — after **Recompute** the
-  status bar reports how many clusters Leiden found, e.g.
-  *"…· Leiden found 7 cluster(s)"*. If you want more (or fewer) populations,
-  raise (or lower) the resolution and **Recompute** again.
-- **Sample multiple seeds** (checkbox) — mirrors k-means' multi-restart
-  reproducibility: when ticked, Leiden runs several random-seeded passes and keeps
-  the best-quality partition, so repeated runs with the same settings return
-  identical clusters. Left unticked, Leiden runs a single faster pass whose exact
-  result may vary run to run (the same *populations* are still found — only which
-  integer id each gets can shift).
+- **Resolution** (0.1–3.0, default 1.0) — replaces **Clusters (k)**. Higher values
+  give more, smaller clusters; lower values give fewer, larger clusters. After
+  **Recompute** the status bar shows the number of clusters found, e.g.
+  *"7 cluster(s)"*. To get more or fewer clusters, raise or lower the resolution
+  and click **Recompute** again.
+- **Sample multiple seeds** — see §11.1. When ticked, Leiden runs 10 times with a
+  fixed seed (42) and keeps the best result. When unticked, cluster numbers, and
+  sometimes boundaries, can change between runs.
 
-The kNN graph-neighbour count and edge-weighting scheme are fixed, sensible
-defaults (not exposed as controls in this release) — see the design note in the
-repository for the full recipe and rationale.
+The neighbour count (15) and the edge weighting (shared-neighbour Jaccard) are fixed
+and cannot be changed in this version.
 
-**Cohort (project scope) assignment differs by method**
+**How cells outside the sample are assigned (project scope)**
 
-Leiden has no centroids to assign new cells to — averaging a non-spherical
-community into one point would defeat the method. So in **Project** scope
-(§11.5), Leiden fits once on the pooled sample exactly like k-means does, but the
-**assignment** pass differs:
-
-- **k-means** assigns each cell to its **nearest cohort centroid** (Euclidean, in
-  z-scored marker space).
-- **Leiden**, with **Transfer from sample** selected (§11.5), assigns each cell by
-  **kNN label transfer**: it finds that cell's nearest neighbours *within the
-  labelled fitted sample* and takes a majority vote of their Leiden labels — the
-  same approach scanpy uses (`sc.tl.ingest`) to map new cells onto an existing
-  clustering. Per-cluster mean marker profiles are still computed for the
-  assignment-pane heatmap either way — only the per-cell assignment mechanism
-  differs. With **Cluster all cells** selected instead, there is no separate
-  "assign" step at all — every cell is a first-class member of the single
-  cohort-wide Leiden partition (§11.5).
-
-Both methods otherwise share the exact same pipeline: the same z-scored active
-marker matrix, the same `cluster[]` label array driving plot colour/legend/box
-selection, and the same **Apply Clusters… / Assign Clusters…** dialog for naming
-populations.
-> Even so, per-marker normalisation does not fully correct **per-image** staining
-> differences, so when cells are pooled across a cohort, comparable staining still
-> matters: globally brighter slides can shift the pooled clusters. Normalise
-> upstream if intensity scales differ a lot, or interpret with that in mind.
-
-> **This writes classifications and saves every selected image.** It replaces the
-> existing class on assigned cells (the extension's training labels are untouched). The
-> currently-open image updates live; others are saved to disk.
+- **k-means:** each cell joins the cluster with the closest mean.
+- **Leiden, Transfer from sample:** each cell takes the most common cluster among its
+  15 nearest cells in the sample.
+- **Leiden, Cluster all cells:** all cells are clustered together, so no assignment
+  step is needed (§[11.5](#115-project-wide-clustering-across-images)).
 
 ---

@@ -145,10 +145,10 @@ public class DistanceMeasurementsDialog {
         crossClassCheck.setSelected(true);
         sameClassCheck.setSelected(true);
         annotationDistCheck.setTooltip(
-                new Tooltip("Calls QuPath's DistanceTools.detectionToAnnotationDistancesSigned.\n"
-                        + "Negative when the detection centroid lies inside the annotation, positive when outside."));
-        crossClassCheck.setTooltip(new Tooltip("Calls QuPath's DistanceTools.detectionCentroidDistances.\n"
-                + "For each cell, writes the nearest centroid-to-centroid distance to a cell of every OTHER class."));
+                new Tooltip("For each cell, writes the distance from its centroid to each annotation class.\n"
+                        + "Negative when the centroid lies inside the annotation, positive when outside."));
+        crossClassCheck.setTooltip(new Tooltip(
+                "For each cell, writes the nearest centroid-to-centroid distance to a cell of every OTHER class."));
         sameClassCheck.setTooltip(new Tooltip(
                 "For each cell, finds the nearest cell of the SAME class (excluding itself) and writes the distance under\n"
                         + "'Distance to other <class> <unit>'. Parallelised across CPU cores per class."));

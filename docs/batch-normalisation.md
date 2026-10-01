@@ -1,43 +1,43 @@
 # Batch normalisation (UniFORM)
 
-Multiplex staining varies image-to-image — the same marker can sit at a different intensity on different slides or runs. **Batch normalisation** aligns each image's marker-intensity distribution to a common reference so that clustering and the classifier see one consistent intensity scale across a cohort, instead of learning the batch. SP Classify implements the **feature-level UniFORM** method (Wang et al., *Cell Reports Methods* 2025; see [README ▸ References](how-to-cite.md)): for each marker it aligns per-image log-intensity histograms by the rigid shift that best matches a reference, and that shift maps back to a single per-image multiplicative **gain** per channel. Because it is a translation in log-space, the distribution's *shape* is preserved — only its location moves — so it is conservative about erasing real biology.
+Staining intensity often differs between slides or runs. Batch normalisation multiplies each image's intensity for each marker by one correction factor, so that the distribution lines up with a reference. Only the position of the distribution changes, not its shape. Clustering and the classifier then see the same intensity scale across the cohort. The method is feature-level UniFORM (Wang et al., *Cell Reports Methods* 2025; see [README ▸ References](how-to-cite.md)).
 
-Open it from **Extensions ▸ SP Classify ▸ Batch Normalisation…**.
+Open it from *Extensions → SP Classify → Batch Normalisation...*.
 
-> The gain is computed from each channel's **Cell: Mean** intensities and then applied to every statistic of that channel. Only intensity measurements are corrected; foundation-model embeddings are excluded. Nothing is overwritten unless you explicitly write columns — see §19.4.
+> The correction factor for each channel is calculated from its **Cell: Mean** intensities (or **Cell: Median** if Mean is not selected) and applied to every selected measurement of that channel. Only intensity measurements are corrected; foundation-model embeddings are excluded. Existing measurements are never changed; corrected values are added as new columns only if you click **Write corrected columns** (§19.4).
 
 ### 19.1 When to use it
 
-- You cluster or train **across multiple images/slides** stained in different runs and see clusters or classes that track the *slide* rather than the biology.
-- It complements the clustering normalisation of §[4.2](setup.md#42-clustering-normalisation) (arcsinh/sqrt): that applies the **same** transform to every image and so cannot remove per-slide offsets (it says as much in its own limitations). Batch normalisation is the missing per-image step. Single-image analysis does not need it.
+- You cluster or train across images stained in different runs, and clusters or classes follow the slide rather than the biology.
+- Clustering normalisation (§[4.2](setup.md#42-clustering-normalisation)) applies the same transform to every image, so it cannot remove differences between slides. Batch normalisation corrects each image separately. You do not need it for a single image.
 
 ### 19.2 Fitting — step by step
 
-1. **Correct measurements** — *Choose measurements…* picks the marker intensities to align (embeddings are excluded automatically).
-2. **Images** — *Choose images…* picks the cohort. *Also include projects ▸ Add project…* pools images from other SP Classify projects into the same fit (they must share the marker/measurement names); *Clear* resets.
-3. **Batch grouping** (optional) — *Assign batches…* opens an Image → Batch table. Assign by double-clicking a cell, selecting rows → *Assign selected → batch…*, **Auto-detect from name**, or **Load CSV…**. The grouping drives per-batch mode and the QC view.
-4. **Granularity** —
-   - **Per image** — each image is aligned to the reference independently (finest correction).
-   - **Per batch** — images pooled within a batch are aligned together (uses the grouping above).
-5. **Advanced** — **Bins** (log-histogram resolution, default 1024), **Cells/image** (subsample cap for the fit, default 50,000), **Workers** (images processed in parallel).
-6. **Run fit** — computes the per-image/per-batch gains and saves them to `<project>/celltune/batch-shifts.json`. The fit persists across sessions and can be re-run any time.
+1. **Correct measurements**: click **Choose measurements…** and pick the marker intensities to align. Embeddings are excluded automatically.
+2. **Images**: click **Choose images…** to pick the images. To include images from another project, click **Add project…** (next to **Also include projects:**) and select its `project.qpproj`. Measurement names must match. **Clear** removes added projects.
+3. **Batch grouping** (optional): batches are first filled in from the image names. Click **Assign batches…** to edit them in the **Assign Images to Batches** table: double-click a cell, select rows and click **Assign selected → batch…**, or use **Auto-detect from name** or **Load CSV…**. Batches are used by **Per batch** mode and by the QC view.
+4. **Granularity**:
+   - **Per image (each image → reference)** (default): aligns each image to the reference separately.
+   - **Per batch (pool images in a batch)**: pools the images in each batch and aligns the batches. Differences between images in the same batch are kept.
+5. Set **Bins** (default 1024, range 64–4096), **Cells/image** (cells sampled per image for the fit, default 50,000, range 1,000–2,000,000) and **Workers** (images processed at once, default: number of CPU cores minus 1, up to 8).
+6. Click **Run fit**. It calculates the correction factors and saves them to `<project>/celltune/batch-shifts.json`. The fit is kept between sessions; you can run it again at any time.
 
 ### 19.3 QC — did it work?
 
-**Show QC** opens *Batch Normalisation — QC*: per-marker log-intensity density curves (one per batch) with a spread (SD) readout. **Lower SD = better aligned** — the curves should overlap after correction. Scan a few markers to confirm the batches were pulled together without collapsing genuine structure.
+**Show QC** opens *Batch Normalisation — QC*. For each marker it shows log-intensity density curves (one per batch) and the spread between batches before and after correction (**Before (SD)**, **After (SD)**). Lower SD means the batches are better aligned. Check several markers. After correction, the curves for each batch should overlap and the SD should fall. If a curve that had two peaks now has one, the correction may have removed real differences.
 
 ### 19.4 How it's applied
 
-Two independent options:
+There are two separate options:
 
-- **Streamed (recommended)** — tick **"Use batch-corrected values in clustering + ML"**. Clustering *and* classifier training/inference then multiply each cell's measurements by that image's fitted gain **in memory** before use: no columns are written, nothing on the cells changes, and the correction is applied consistently at every seam (clustering, training, and single-image auto-classify / batch-apply to other images). It is a persistent project preference (`celltune.useBatchCorrection`), so it stays on until you untick it, and is a no-op when no fit exists.
-- **Written columns** — **Write corrected columns** materialises the corrected values as new `…(batchnorm)` measurement columns (for export or inspection). The raw columns are left intact.
+- **In memory (recommended):** tick **Use batch-corrected values in clustering + ML (streamed, no columns)**. Clustering, training and classification then use corrected values in memory. Cell measurements are not changed. The setting is also in *Edit → Preferences → SP Classify* as **Use batch-corrected values**. It stays on until you untick it, and does nothing until a fit exists.
+- **Write corrected columns:** adds a `<marker>: Cell: Mean (batchnorm)` column for each corrected marker, for export or inspection. The raw columns are kept.
 
 ### 19.5 Tips & cautions
 
-- **Fit before you cluster or train** — the streamed toggle only does anything once a fit exists in the project.
-- **Grouping matters for per-batch mode** — with everything in one batch, per-batch mode is just a single-reference alignment; *Auto-detect from name* bootstraps groups from filename conventions.
-- **It can over-correct** — treating each slide as a batch can erase real biology if a cohort genuinely differs by group. QC each marker, and don't batch-correct across groups you expect to differ (mirrors the caution in §[18.8](neighborhoods.md#188-tips--cautions)).
-- **Cross-project fits** require a shared marker panel — measurement names must match across the pooled projects.
+- **Fit before you cluster or train.** The in-memory option does nothing until the project has a fit.
+- **Per batch mode needs a batch grouping.** If all images are in one batch, Per batch mode makes no correction. **Auto-detect from name** sets batches from image names.
+- **It can over-correct.** If your groups really differ in intensity, for example treated and control, putting them in different batches removes that difference. Check the QC view for each marker.
+- **Projects fitted together need the same marker panel**: measurement names must match in every project.
 
 ---

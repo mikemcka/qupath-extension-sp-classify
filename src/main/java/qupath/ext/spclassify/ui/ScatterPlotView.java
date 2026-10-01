@@ -91,7 +91,7 @@ public class ScatterPlotView {
     /**
      * UMAP builds a k-NN graph and optimises a layout — expensive on very large
      * point sets. Above this count we embed a random subsample (other cells are
-     * left unplotted, with a notice). PCA and k-means always run on all cells.
+     * left unplotted, with a notice). PCA and clustering always run on all loaded cells.
      */
     private static final int MAX_UMAP_CELLS = 20_000;
 
@@ -335,8 +335,8 @@ public class ScatterPlotView {
         fullUmapCheck.setTooltip(new javafx.scene.control.Tooltip("Embed ALL cells in UMAP instead of a "
                 + String.format("%,d", MAX_UMAP_CELLS)
                 + "-cell sample. Much slower and more memory-hungry on large "
-                + "images, but plots every cell. Only affects UMAP — k-means "
-                + "already clusters all cells regardless."));
+                + "images, but plots every cell. Only affects UMAP — clustering "
+                + "already uses all loaded cells regardless."));
         fullUmapCheck.setDisable(embeddingCombo.getValue() != Embedding.UMAP);
         embeddingCombo.valueProperty().addListener((o, a, b) -> {
             fullUmapCheck.setDisable(b != Embedding.UMAP);
@@ -387,14 +387,13 @@ public class ScatterPlotView {
 
         pcaEnabledCheck = new CheckBox("Reduce dims (PCA)");
         pcaEnabledCheck.setSelected(PCA_ENABLED_PREF.get());
-        pcaEnabledCheck.setTooltip(new javafx.scene.control.Tooltip(
-                "Project onto principal components before building the clustering kNN graph, "
-                        + "when the marker panel is wide (> " + ScatterMath.PCA_DEFAULT_THRESHOLD
-                        + " measurements). Fixes two problems with wide panels: markers with more "
-                        + "measurements no longer dominate the distance, and high-dimensional distance "
-                        + "concentration no longer degrades the neighbour graph (the scanpy/Seurat "
-                        + "standard). On by default; applies to both k-means and Leiden. Below the "
-                        + "threshold this is a no-op — the existing small-panel behaviour is unchanged."));
+        pcaEnabledCheck.setTooltip(
+                new javafx.scene.control.Tooltip("Reduce the measurements to principal components before clustering, "
+                        + "when more than " + ScatterMath.PCA_DEFAULT_THRESHOLD
+                        + " measurements are selected. This stops markers with many measurements "
+                        + "from dominating the clustering and gives more reliable clusters on wide "
+                        + "panels. On by default; applies to both k-means and Leiden. Has no effect "
+                        + "at or below that number of measurements."));
         pcaComponentsSpinner = new Spinner<>(2, 500, PCA_COMPONENTS_PREF.get());
         pcaComponentsSpinner.setEditable(true);
         pcaComponentsSpinner.setPrefWidth(70);
@@ -510,7 +509,7 @@ public class ScatterPlotView {
 
         clusterMarkersBtn = new MenuButton("Cluster markers (all)");
         clusterMarkersBtn.setTooltip(
-                new javafx.scene.control.Tooltip("Markers used for k-means and the embedding. Uncheck markers to "
+                new javafx.scene.control.Tooltip("Markers used for clustering and the embedding. Uncheck markers to "
                         + "sub-cluster on a focused panel (e.g. immune markers only). "
                         + "Values are re-standardized over the active cells each run."));
         for (String marker : this.markerFeatures) {
@@ -522,10 +521,10 @@ public class ScatterPlotView {
         }
 
         Button recomputeBtn = new Button("Recompute");
-        recomputeBtn.setTooltip(
-                new javafx.scene.control.Tooltip("Re-fit k-means + the embedding on the current rows (the open image, "
-                        + "or the project sample). Does not re-sample — use “Images…” for "
-                        + "that in project scope."));
+        recomputeBtn.setTooltip(new javafx.scene.control.Tooltip(
+                "Run the clustering (k-means or Leiden) and the embedding on the loaded "
+                        + "cells. Does not draw new cells — use “Re-sample” for that. In project "
+                        + "scope with no sample loaded yet, it draws one first."));
         recomputeBtn.setOnAction(e -> recompute());
 
         // ── Scope toggle: cluster the open image, or a project-wide sample ───────
@@ -536,10 +535,11 @@ public class ScatterPlotView {
         projectScopeToggle.setToggleGroup(scopeGroup);
         imageScopeToggle.setSelected(true);
         imageScopeToggle.setTooltip(
-                new javafx.scene.control.Tooltip("Cluster every cell of the open image, with full viewer "
-                        + "interaction (box/lasso select, click-to-select)."));
-        projectScopeToggle.setTooltip(
-                new javafx.scene.control.Tooltip("Fit one k-means on a bounded sample pooled across selected images, "
+                new javafx.scene.control.Tooltip("Cluster cells from the open image (a random subset of up to the "
+                        + "Sample cap), with full viewer interaction (box/lasso select, "
+                        + "click-to-select)."));
+        projectScopeToggle.setTooltip(new javafx.scene.control.Tooltip(
+                "Fit one clustering (k-means or Leiden) on a sample pooled across selected images, "
                         + "then assign it consistently across the whole cohort. Viewer "
                         + "selection is plot-only here (sampled cells aren't all open)."));
         scopeGroup.selectedToggleProperty().addListener((obs, old, sel) -> {

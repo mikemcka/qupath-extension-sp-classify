@@ -2,108 +2,100 @@
 
 ### 5.1 Initial manual labelling
 
-Click **Manual Label Mode** in the sidebar. A floating toolbar appears:
+Click **Manual Label Mode** in the sidebar. A floating toolbar opens:
 
 ![Manual label mode](doc_images/manual_label_mode.png)
 
-- Click a cell in the QuPath viewer → its ID and current class show at the top, the status dot turns lime if labelled, white if not.
-- A **magenta ring** marks the selected cell (a lightweight overlay — won't slow down 50k+ cell images).
-- Up to 12 quick-access class buttons appear inline; the rest live under **All Classes ▼**.
-- **Auto-advance to next detection** — when ticked, assigning a label automatically jumps to the next cell.
+- Click a cell in the viewer. The toolbar shows its ID and current class. The status dot is lime if the cell has a class and white if it has none.
+- The selected cell has a magenta ring.
+- Up to 12 class buttons are shown in the toolbar. Other classes are under **All Classes ▼**.
+- **Auto-advance to next detection**: when ticked, the next cell is selected after you assign a label.
 
-**How many to label?** Aim for **at least 20–30 cells per class** before your first training run. The extension will refuse to train with fewer than 10 labelled cells total. You can — and should — add more after each review cycle.
+**How many cells to label:** label at least 20–30 cells per class before the first training run. Training does not start with fewer than 10 labelled cells in total. Add more labels after each review cycle.
 
-> The **Model 1** / **Model 2** buttons only appear once you've trained at least once. They let you accept a prediction with one click. Background colour: blue = M1, pink = M2.
+> After the first training run, two more buttons appear: **Model 1: CD8 (87%)** (blue) and **Model 2: CD4 (65%)** (pink). Each shows that model's predicted class and confidence for the selected cell. Click one to accept that prediction.
 
 ### 5.2 Choose images to apply the classifier to
 
-Click **Apply to which images... (N)** above the train button.
+Click **Apply to which images...** in the sidebar.
 
 ![Images to apply](doc_images/select_images.png)
 
-- Dual-list selector. Left = images the classifier will predict on, right = excluded.
-- Per-list search and Move-all/Move-selected arrows.
-- The **currently open image is always included** and can't be moved out.
-- Click **OK**; the button label now shows the count, e.g. `Apply to which images... (12)`.
+- The left list holds the images the classifier will be applied to. The right list holds excluded images.
+- Use the search boxes and the arrow buttons (`>`, `>>`, `<`, `<<`) to move images between the lists.
+- The open image is always included and cannot be moved.
+- Click **OK**. The button then shows the number of images, e.g. `Apply to which images... (12)`.
 
-This is a quick way to reduce prediction times but only focusing on one or a few images.
+Choose fewer images to make the apply step faster.
 
 ### 5.3 CPU threads and Images at once
 
 ![Compute settings: Rounds, Max depth, CPU threads, Images at once](doc_images/classifier_compute_settings.png)
 
-Two speed controls. They do different jobs, so they are separate numbers. (Labels get cut off in a narrow panel — widen it, or hover for the full text.)
+These two settings control speed. If their labels are cut off, widen the panel or hold the mouse over a control to see its tooltip.
 
-**CPU threads — makes training faster.**
-Leave at **0**, which means "use all CPU resources. Lower it only if you want to keep working in QuPath while a long training run happens in the background, or if you're sharing a compute node with someone. Your choice is remembered next time.
+**CPU threads** sets how many processor threads training uses. The default is **0**, which uses all processors. Lower it to keep QuPath responsive during training, or when you share a compute node. The value is remembered between sessions. Changing it can change results very slightly, so use the same value when you compare two training runs.
 
-> One thing to know: changing this number can nudge the results very slightly. Neither setting is more correct. If you're comparing two training runs, just use the same number for both.
-
-**Images at once — makes *applying* the classifier to other images faster.**
-This only matters after training, when the classifier is being applied to the other images you picked. Each image being processed has to be fully loaded, so this uses memory rather than processor. **1** on a 16 GB machine, **2–3** on 32 GB. Maximum 8. If you set it too high, QuPath may run out of memory.
+**Images at once** sets how many images are classified at the same time after training. The default is 1 and the range is 1–8. It has no effect on training. Each image is loaded fully into memory, so a higher value uses more memory. Suggested values: 1 on a 16 GB machine, 2–3 on 32 GB. If QuPath runs out of memory, set it back to 1.
 
 ### 5.4 Pick the right settings
 
-The defaults are tuned for typical multiplex panels. Adjust as follows:
+Most users can leave these at their defaults.
 
-| Setting | Default | Turn ON when… | Turn OFF when… |
+| Setting | Default | Turn on when… | Turn off when… |
 |---|---|---|---|
-| **Pool labels from all images** | ✅ | (always; auto-on in binary mode) | training a per-image model intentionally |
-| **Enable data balancing** + `SMOTE + Tomek` | ✅ | one class << others (typical multiplex) | classes are already balanced or you want raw counts |
-| **Auto-tune hyperparameters** | ❌ | first/last build of a new panel, and you can leave it overnight | iterating fast; defaults known to work |
-| **Early stopping** | ✅ | (always — no downside) | reproducing a paper with a fixed round count |
-| **Train/val metrics** | ✅ | you want the Training Metrics report | iterating fast — it costs about ⅓ of training time |
-| **Show top 10 feature importance** | ✅ | (always — cheap) | reducing UI clutter |
-| **Auto-prune features** | ✅ | (always — non-destructive, faster training) | running a reproducible benchmark |
-| **Restrict to features shared with imported data** | ❌ | merging labels imported from a different panel | training on this project only |
-| **Sample current image only** | ❌ | drilling into one tricky FOV | (default — covers whole project) |
+| **Pool labels from all images** | ✅ | recommended (always on in binary mode) | you want a model trained on the open image's labels only |
+| **Enable data balancing** + `SMOTE + Tomek` | ✅ | one class has many fewer labels than others | classes are already balanced, or you want to train on the labels as they are |
+| **Auto-tune hyperparameters** | ❌ | you can leave training running for several hours (see **Auto-tune** below) | you are still adding labels |
+| **Early stopping** | ✅ | recommended | you need a fixed number of rounds, e.g. to reproduce a published setting |
+| **Train/val metrics** | ✅ | you want the Training Metrics report | you are still adding labels (see below) |
+| **Show top 10 feature importance after training** | ✅ | recommended | you do not want the chart to open after training |
+| **Auto-prune features (drop near-constant & redundant)** | ✅ | recommended (faster training; no measurements are deleted) | you need every selected feature used, e.g. for a benchmark |
+| **Restrict to features shared with imported data** | ❌ | you imported labels from a project with a different panel | you train on this project's labels only |
+| **Sample current image only** | ❌ | you want to review cells from the open image only (§5.7) | you want to review cells from every image (default) |
 
-**Resampling strategies** (visible when Enable data balancing is on):
+**Resampling strategies** (the **Strategy:** dropdown, shown when **Enable data balancing** is ticked):
 
-**Leave as default if you don't understand this** This is complicated and involves generating synthetic data or removing datapoints from a feature set which will vary as your training dataset changes over time.
+Leave this at the default (`SMOTE + Tomek`) unless you have a specific reason to change it.
 
 | Strategy | Effect |
 |---|---|
-| `NONE` | No resampling |
-| `SMOTE` | Synthetic minority oversampling (k=5 nearest same-class neighbours) |
-| `ADASYN` | Like SMOTE but concentrates synthetics on hard-to-classify minorities |
-| `TOMEK` | Removes majority-class members of mutual nearest-neighbour pairs (cleans boundary) |
-| `SMOTE + Tomek` (default) | SMOTE, then Tomek cleanup |
-| `ADASYN + Tomek` | ADASYN, then Tomek cleanup |
+| `None` | No resampling |
+| `SMOTE` | Adds synthetic cells to small classes, made from each cell's 5 nearest cells of the same class |
+| `ADASYN` | Like SMOTE, but adds more synthetic cells where a small class is hard to separate from other classes |
+| `Tomek links` | Finds pairs of cells of different classes that are each other's nearest neighbour, and removes the cell from the larger class |
+| `SMOTE + Tomek` (default) | SMOTE, then Tomek links |
+| `ADASYN + Tomek` | ADASYN, then Tomek links |
 
-Defaults work for ~90% of cases. Switch to `SMOTE` alone if Tomek is removing too much real signal; switch to `ADASYN` if a minority class lives in a hard region of feature space.
+Use `SMOTE` alone if Tomek links removes too many labelled cells (the training log shows how many it removed). Use `ADASYN` if a small class is often confused with a larger one.
 
-**Train/val metrics.** On by default. This is what fills in the **Training Metrics** report (per-class scores). Producing it means training each model a second time on part of your data, which costs roughly a third of the total training time. Untick it while you're still adding labels and re-tick it for the run you want to keep — your classifier is identical either way, you just don't get the report.
+**Train/val metrics** produces the **Training Metrics** report (§5.6). It adds about a third to training time and does not change the trained classifier. Untick it while you are still adding labels, and tick it again for your final run.
 
-**Auto-tune is slow.** It trains 200 models to search for better settings. On a big panel that's hours, not minutes — plan for overnight. The training log tells you how many it's about to do.
+**Auto-tune** tests different model settings and keeps the best settings for each model. It trains 2 × **Trials** × **CV folds** models. The defaults are 20 trials and 5 folds, which is 200 models. Trials can be set from 5 to 100 and CV folds from 2 to 10; these controls are shown when **Auto-tune hyperparameters** is ticked. With many features and classes this can take several hours. The training log shows the number of models before it starts.
 
-**Models 1 & 2.** Default pair is **XGBoost + LightGBM**. Random Forest is also available. Keep the two model types **different** — that's the whole point of dual-model disagreement. Auto-tune runs independently per model.
+**Model 1 and Model 2.** The default is XGBoost (Model 1) and LightGBM (Model 2). Random Forest is also available. Use two different model types: review mode depends on the two models disagreeing. Training runs on the CPU only.
 
-**Training uses the CPU.** This is a CPU-only build; there is no benefit at this scale anyway — a graphics card only starts to pay off with far more labelled cells than a typical panel has.
+**Rounds / Max depth.** The defaults are 500 rounds (range 50–1000) and depth 6 (range 2–15).
 
-**Rounds / Max depth.** Default 500 rounds, depth 6.
+- With **Early stopping** ticked (the default), Rounds is a maximum. Each model stops adding rounds when it stops improving.
+- With **Early stopping** unticked, every round is trained. Lower Rounds to reduce training time.
 
-**Rounds is a limit, not a target** — as long as **Early stopping** is on (it is by default). Each model keeps adding rounds until it stops getting better, then stops on its own. So a model that only needs 130 rounds uses 130 and the setting costs you nothing; a model that would still be improving at 200 is no longer cut off. That's why the default is generous.
-
-> ⚠️ **If you untick Early stopping, this becomes a literal count** and every round is trained. 500 rounds will then take much longer than 200. Lower it if you turn early stopping off.
-
-The training log tells you what each model actually used: `best round 127/500` means it converged comfortably, while a number close to your limit means it was still improving and you could raise it further.
+The training log shows the rounds each model used, e.g. `XGBoost early stopping: best round 127/500`. If the number is close to the maximum, raise **Rounds**.
 
 ### 5.5 Train
 
-Click **Train**. A progress dialog shows the current step (feature extraction, balancing, fold training, etc.). Before training starts, a timestamped backup of the label store is written to `<project>/celltune/labels_backup_*.json`.
+Click **Train**. A progress window shows the current step. Before training starts:
 
-**Before it starts**, SP Classify checks whether you have enough memory. If it looks tight, you get a warning with a Proceed/Cancel choice — cancelling now is cheaper than running out of memory twenty minutes in. It's a rough check, so it catches obvious problems rather than guaranteeing success.
+- a backup of your labels is saved to `<project>/celltune/labels_backup_*.json`.
+- SP Classify estimates how much memory training needs. If the estimate is more than 80% of the memory available to QuPath, a warning asks **Proceed anyway?** The estimate is approximate. To give QuPath more memory, set **Edit → Preferences → Maximum memory** and restart QuPath. To need less memory, select fewer features or set **Strategy:** to `None`.
 
-Status bar after success: `Training complete — 523 cells classified, 47 disagreements.`
+When training finishes, the sidebar status line shows e.g. `Training complete — 523 cells classified, 47 disagreements.`
 
 #### The training log file
 
-Every run saves a copy of its log to `<project>/celltune/logs/`. The on-screen log disappears when you close the progress window; this one doesn't, and it survives a crash. The 20 most recent are kept. (Without a project there's nowhere to save it, so training just runs without one.)
+Each training run saves its log to `<project>/celltune/logs/`. The 20 most recent logs are kept. The file is kept after the progress window closes and after a crash. If no project is open, no log file is saved.
 
-The log starts with everything about the run — cell and label counts, every setting you used, your memory — so you can send it to someone without having to explain the setup.
-
-It ends with where the time went, slowest first:
+The log starts with the cell and label counts, every setting used and the available memory. It ends with the time taken by each step, slowest first:
 
 ```
 ── Where the time went ──────────────────────────────────
@@ -113,30 +105,30 @@ It ends with where the time went, slowest first:
   predict all cells           39.88s    5.6%
 ```
 
-Check this first if training feels slow — it tells you which step to actually do something about. If a run fails, the last line names the step it failed on.
+If training is slow, this table shows which step took longest. If a run fails, the last line names the step that failed.
 
 ### 5.6 Inspecting the result
 
-Two views are unlocked after a successful run:
+Three buttons become available after training: **Agreement Confusion Matrix**, **Training Metrics** and **Feature Importance...**.
 
 #### Confusion Matrix (button)
 
-The **inter-model agreement** matrix — rows = XGBoost prediction, columns = LightGBM prediction.
+**Agreement Confusion Matrix** compares the two models' predictions for every cell. Rows are Model 1's predictions and columns are Model 2's. (The axis titles read `Model 1 (XGBoost)` and `Model 2 (LightGBM)` whichever model types you chose.)
 
-- **Diagonal cells (blue)** — both models agreed on this class.
-- **Off-diagonal cells (orange/red)** — the two models disagreed; these are the cells that go into Review Mode.
-- **Right column** — per-class recall-style %.
-- **Bottom row** — per-class precision-style %.
-- **Far right** — per-class Dice (inter-model F1).
-- **Summary line:** `Total: X | Agreement: Y (Z%) | Disagreement: A (B%) | Macro Dice: D`.
+- **Diagonal (blue):** cells where both models chose the same class.
+- **Off the diagonal (orange/red):** cells where the models chose different classes. Review mode samples from these cells.
+- **Right column:** for each Model 1 class, the percentage of its cells that Model 2 also assigned to that class.
+- **Bottom row:** for each Model 2 class, the percentage of its cells that Model 1 also assigned to that class.
+- **Dice column:** agreement score per class, from 0 (no agreement) to 1 (full agreement).
+- **Summary line:** `Total: X cells | Agreement: Y (Z%) | Disagreement: A (B%) | Macro Dice: D`. Macro Dice is the mean Dice over all classes.
 
-A diagonal-dominant matrix means the two models broadly agree; large off-diagonal hotspots show systematic confusion pairs (e.g. CD4/CD8 cross-talk) — those are your priority for the next labelling round.
+If most cells are on the diagonal, the two models mostly agree. A large value off the diagonal shows two classes the models often confuse (e.g. CD4 and CD8). Label more cells of those two classes in the next round.
 
 ![Inter-model agreement confusion matrix](doc_images/agreement_confusion_matrix.png)
 
 #### Training Metrics (button)
 
-Per-class **precision / recall / F1 / support** for each model, computed on a held-out **20% stratified validation split**:
+**Training Metrics** shows precision, recall, F1 and support (number of cells) for each class and each model. These are calculated on 20% of the labelled cells of each class, held back from training:
 
 ```
 class            precision   recall      f1   support
@@ -150,37 +142,42 @@ macro F1                              0.894       500
 weighted F1                           0.903       500
 ```
 
+Tick **Show 80% training-set rows (for over-fit diagnosis)** to also show the scores on the training cells.
+
 ![Training metrics](doc_images/training_metrics.png)
 
-There's also a **Validation Confusion Matrix** view (true class × predicted class on the same 20% fold), with both absolute counts and row-normalised recall heatmaps, plus a per-row diagonal = recall.
+**Validation Confusion Matrix (XGBoost)…** shows the true class (rows) against Model 1's predicted class (columns) for the same 20% of cells. It has two heatmaps: cell counts, and counts as a percentage of each row. The diagonal of the percentage heatmap is each class's recall.
 
 ![Validation confusion matrix](doc_images/validation_confusion_matrix.png)
 
 **Exports:**
-- **CSV** — long format `split,model,class,precision,recall,f1,support`, with summary rows tagged `__accuracy__`, `__macro_f1__`, `__weighted_f1__` so they're easy to filter in pandas/R.
-- **PNG** — side-by-side validation confusion-matrix heatmaps.
+- **Download CSV…** (Training Metrics window): long format `split,model,class,precision,recall,f1,support`. Summary rows have the class `__accuracy__`, `__macro_f1__` or `__weighted_f1__`, so you can filter them out in pandas or R.
+- **Download PNG…** (Validation Confusion Matrix window): both heatmaps side by side. This window also has **Download CSV…**.
 
-> **Don't trust an F1 of 0.95 on its own.** A 20% stratified split from the same image (or even from a tight cluster of similar images) overstates how well the model will generalise. The honest test is: **open a different slide, predict, and visually scan the results**, then check the Project Prediction Summary (§8). If a slide has predictions that look wrong by eye, the F1 lied — go label some of its cells.
+> **A high F1 score does not mean the classifier works on new images.** The validation cells come from the same images as the training cells, so F1 overestimates performance on other images. To check, open a different image, apply the classifier, look at the results, and check the Project Prediction Summary (§[8](prediction-summary.md)). If predictions on an image look wrong, label some of its cells and retrain.
 
 #### Feature Importance (button)
 
-Top-N (up to 10) features by **mean |SHAP|** per class. Horizontal bars, one colour per class, dropdown to switch classes. SHAP is averaged across whichever models are active (TreeSHAP for XGBoost/LightGBM, normalised split counts for Random Forest).
+**Feature Importance...** shows the 10 features that most affect each class's prediction (mean |SHAP| value), as horizontal bars. Use the **Class:** dropdown to switch class. Values come from the XGBoost model and from any Random Forest model. LightGBM is not included, so with the default pair (XGBoost + LightGBM) the chart shows XGBoost only.
 
-Use it to spot features the model is over-relying on (e.g. if `Cell: DAPI Mean` dominates every class, it probably shouldn't be in the feature set — de-select it in Select Features, §[4.1](setup.md#41-select-features); note that changing the arcsinh cofactor won't fix this, since the tree models are invariant to that monotone transform). It's also where a stray feature you forgot to de-select in Select Features (§4.1) tends to show up — a non-biological column like a cell index or centroid coordinate ranking near the top is a red flag that it leaked into training.
+Use it to find features to remove:
+
+- If one feature (e.g. `Cell: DAPI Mean`) ranks highest for every class, de-select it in Select Features (§[4.1](setup.md#41-select-features)) and retrain.
+- If a non-biological column, such as a cell ID or a centroid coordinate, ranks near the top, it was included in training by mistake. De-select it in Select Features and retrain.
 
 ![Feature importance showing a leaked cell-index feature](doc_images/index_feature_leakage.png)
 
-Here `kronos_cell_id` (a cell index) dominates the SHAP ranking — a clear sign it leaked into training and should be de-selected in Select Features.
+In this example `kronos_cell_id` (a cell index) ranks highest. De-select it in Select Features.
 
 ### 5.7 Optional — restrict sampling to specific annotations
 
-Two controls above the buttons:
+Two controls above **Enter Review Mode** limit which cells review mode samples:
 
-- **Sample current image only** — limits review/sampling to the open image.
-- **Filter by annotation keywords** — comma-separated, case-insensitive substring match against annotation names. Example: `Tumour, Margin` → only cells whose centroid falls inside an annotation whose name contains "Tumour" or "Margin" are eligible.
+- **Sample current image only** (checkbox): sample from the open image only.
+- **Specify annotations** (text field): enter words separated by commas, e.g. `Tumour, Margin`. Only cells whose centre is inside an annotation whose name contains one of the words are sampled. Case is ignored.
 
 ![Specify annotations before entering review mode](doc_images/review_mode_specifiy_annotations.png)
 
-Leave both blank to sample across every cell in every project image (recommended default).
+Leave the box unticked and the field empty to sample from every cell in every project image (the default).
 
 ---

@@ -2,42 +2,50 @@
 
 *Extensions → SP Classify → **Utility Scripts***
 
-A grab-bag of common housekeeping operations that would otherwise live in one-off Groovy scripts. Each prompts for its parameters and reports what it did.
+Tools for common cleanup tasks. Each one asks for its settings, then reports what it changed.
 
 ### 13.1 Filter Cells by Size & Circularity
 
-Removes cell detections that are likely mis-segmented or artefacts. A dialog takes an optional **Min** and **Max** for both **Cell area (µm²)** and **Circularity** — leave any field blank for no bound. A cell is removed if it violates *any* active bound (e.g. `area > 500` **or** `circularity < 0.7`). Cells missing either measurement are skipped, not removed. The number of cells to be removed is shown for confirmation first; the operation acts on the **current image** only.
+Removes cell detections from the **current image** that fall outside size and shape limits. The dialog has **Min** and **Max** boxes for **Cell area (µm²)** and **Circularity (0–1)**. It opens with Max area = 500 and Min circularity = 0.7. Clear a box to remove that limit. A cell is removed if it breaks any limit (e.g. `area > 500` **or** `circularity < 0.7`). The tool uses the first measurement whose name contains "area" (or "circularity"). Check which one that is in your cell measurements: it may be a nucleus measurement rather than a whole-cell one. Cells missing either measurement are kept. The number of cells to be removed is shown before anything is deleted.
 
 ### 13.2 Resolve Hierarchy
 
-Rebuilds parent/child relationships from ROI containment — equivalent to the `resolveHierarchy()` scripting call. Choose **Current image** (resolves and refreshes immediately) or **All project images** (confirms first, then resolves and saves every entry). Project-wide work runs in the background so QuPath stays responsive; the open image updates straight away.
+Rebuilds parent/child relationships from object outlines, the same as the `resolveHierarchy()` script command. Choose **Current image** (applied immediately) or **All project images** (asks to confirm, then resolves and saves every image). The open image updates immediately; other images are processed in the background.
 
 ### 13.3 Delete Measurements by Keyword
 
-> ⚠️ **Destructive and not undoable.** Double-check the keyword against your actual measurement names — a loose keyword can delete more columns than you intend.
+> ⚠️ **Destructive and cannot be undone.** Check the keyword against your measurement names. A short keyword can match more columns than you intend.
 
-Removes every detection measurement whose name contains a keyword (case-insensitive by default; tick **Case sensitive** to match exactly). Choose **Current image** or **All project images**. Before deleting, the extension previews the exact list of matching columns and asks you to confirm — if nothing matches, it aborts. Project-wide saves each entry (open image first, the rest in the background).
+Removes every detection measurement whose name contains a keyword. Matching ignores case unless you tick **Case sensitive**. Choose **Current image** or **All project images**. Before deleting, the extension lists the matching columns and asks you to confirm. If nothing matches, nothing is deleted. With **All project images**, every image is saved (the open image first, the rest in the background).
 
 ### 13.4 Import GeoJSON Objects
 
-> ⚠️ **For small-to-medium GeoJSON only.** This importer loads the whole file into QuPath's memory, so very large files (hundreds of MB / millions of objects) can exhaust the heap and crash QuPath. For those, use the dedicated headless pipeline instead: [github.com/BioimageAnalysisCoreWEHI/import_large_geojson](https://github.com/BioimageAnalysisCoreWEHI/import_large_geojson).
+> ⚠️ **For small-to-medium GeoJSON files only.** This importer loads the whole file into QuPath's memory. Very large files (hundreds of MB or millions of objects) can run out of memory and crash QuPath. For those, use the headless pipeline: [github.com/BioimageAnalysisCoreWEHI/import_large_geojson](https://github.com/BioimageAnalysisCoreWEHI/import_large_geojson).
 
-Imports annotations and detections from a `.geojson` (or gzipped `.geojson.gz`) file into the **current image**. Pick the file, then choose whether to **clear existing objects first** and whether to **resolve the hierarchy** afterwards (off by default — it is O(n²) and slow for many objects). Parsing streams the file feature-by-feature on a background thread; objects are added annotations-first (locked), then detections, and the image data is saved automatically.
+**Menu:** *Utility Scripts → [TEST] Import GeoJSON Objects...*
+
+Imports annotations and detections from a `.geojson` or `.geojson.gz` file into the **current image**. Options (both off by default): **Clear existing objects first**, and **Resolve hierarchy after import**. The second can take a long time with many objects. Annotations are added and locked first, then detections, and the image is saved.
 
 ### 13.5 Export Annotation Regions
 
-> ⚠️ **Single-image, small-to-medium exports.** Pixels are streamed tile-by-tile so memory stays bounded, but very large regions or whole-project batch exports are far faster headless on HPC. For those, use the dedicated pipeline: [github.com/BioimageAnalysisCoreWEHI/export_large_annotation_regions](https://github.com/BioimageAnalysisCoreWEHI/export_large_annotation_regions).
+> ⚠️ **Single image, small-to-medium regions.** For very large regions or exports from a whole project, the headless pipeline on HPC is much faster: [github.com/BioimageAnalysisCoreWEHI/export_large_annotation_regions](https://github.com/BioimageAnalysisCoreWEHI/export_large_annotation_regions).
 
-Exports one or more annotation ROIs from the **current image** as polygon-**masked** OME-TIFFs — pixels outside the annotation shape are zeroed, so you get the annotation region rather than its rectangular bounding box. Enter a comma-separated list of annotation names (leave blank to export **all** annotations), set the **downsample**, **tile size**, **writer threads**, **compression** (LZW by default), and whether to write **BigTIFF** and a **pyramid**, then choose an output directory. Each region is written to `<image>__<annotation>.ome.tif` on a background thread, and a notification reports how many succeeded. Requires QuPath's built-in Bio-Formats extension (loaded by default).
+**Menu:** *Utility Scripts → [TEST] Export Annotation Regions...*
+
+Exports annotations from the **current image** as OME-TIFFs. Pixels outside each annotation's outline are set to 0. Enter annotation names separated by commas, or leave blank to export all annotations. Defaults: **Downsample** 1.0, **Tile size (px)** 512, **Writer threads** = number of CPU cores (maximum 32), **Compression** LZW, **BigTIFF** on, **Build pyramid** on. Each region is saved as `<image>__<annotation>.ome.tif` in the folder you choose, and a notification reports how many succeeded. Requires QuPath's Bio-Formats extension (included and loaded by default).
 
 ### 13.6 Reset Project State
 
-> ⚠️ **Destructive.** Permanently deletes everything the extension has saved for this project. Intended for starting over — e.g. when you've **copied a project** to trial different ML options and want a clean slate, since the `celltune/` state travels with the copy.
+> ⚠️ **Destructive.** Deletes everything the extension has saved for this project. Use it to start again, e.g. after **copying a project** to try different classifier settings: the `celltune/` folder is copied with the project.
 
-Deletes the project's entire `celltune/` folder: all labels and per-image label files, trained classifiers (multi-class **and** binary) and predictions, feature selection, normalisation, marker table, composite rules, and sampling/review state. It also resets the running session so nothing re-saves the old state.
+Deletes the project's `celltune/` folder: all labels and per-image label files, trained classifiers (multi-class **and** binary) and predictions, feature selection, normalisation, marker table, composite rules, and sampling/review state. It also resets the current session so the old state is not saved again.
 
-**Safety net:** before deleting anything, a timestamped **`celltune_backup_<timestamp>.zip`** is written to the project folder. To undo a reset, unzip it back into the project folder (recreating `celltune/`). The action is guarded by a typed **`RESET`** confirmation.
+**Backup:** before deleting, the extension writes `celltune_backup_<timestamp>.zip` to the project folder. To undo the reset, unzip it into the project folder. This recreates `celltune/`. To confirm the reset, type `RESET`.
 
-**Images and detections are kept.** The extension's ground-truth **label points** and the **cell classifications** (predictions) it paints onto cells live in each image's `.qpdata`, *not* in `celltune/`. They are left in place unless you tick **"Also clear SP Classify label points and all cell classifications from every image"**, which strips classified point annotations and clears every cell's classification across **all** project images (this rewrites each image's data and runs on a background thread). Tissue/region annotations and unclassified points are never touched.
+**Images and detections are kept.** The extension's ground-truth **label points** and the **cell classifications** (predictions) are stored in each image's `.qpdata`, not in `celltune/`, and are kept by default. To remove them too, tick **"Also clear SP Classify label points and all cell classifications from every image"**. This deletes classified point annotations and clears every cell's classification in **all** project images, and saves each image. Tissue/region annotations and unclassified points are never changed.
+
+### 13.7 Lock All Annotations
+
+Locks every annotation so it cannot be moved or edited by mistake. Choose **Current image** or **All project images** (asks to confirm, then saves every image). A notification reports how many annotations were locked.
 
 ---
