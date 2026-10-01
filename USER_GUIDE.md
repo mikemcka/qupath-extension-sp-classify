@@ -460,7 +460,7 @@ Three buttons become available after training: **Agreement Confusion Matrix**, *
 
 #### Confusion Matrix (button)
 
-**Agreement Confusion Matrix** compares the two models' predictions for every cell. Rows are Model 1's predictions and columns are Model 2's. (The axis titles read `Model 1 (XGBoost)` and `Model 2 (LightGBM)` whichever model types you chose.)
+**Agreement Confusion Matrix** compares the two models' predictions for every cell. Rows are Model 1's predictions and columns are Model 2's. The axis titles name the model types you chose, e.g. `Model 1 (XGBoost)` and `Model 2 (LightGBM)`.
 
 - **Diagonal (blue):** cells where both models chose the same class.
 - **Off the diagonal (orange/red):** cells where the models chose different classes. Review mode samples from these cells.
@@ -493,7 +493,7 @@ Tick **Show 80% training-set rows (for over-fit diagnosis)** to also show the sc
 
 ![Training metrics](doc_images/training_metrics.png)
 
-**Validation Confusion Matrix (XGBoost)…** shows the true class (rows) against Model 1's predicted class (columns) for the same 20% of cells. It has two heatmaps: cell counts, and counts as a percentage of each row. The diagonal of the percentage heatmap is each class's recall.
+**Validation Confusion Matrix (XGBoost)…** (the name in brackets is Model 1's type) shows the true class (rows) against Model 1's predicted class (columns) for the same 20% of cells. It has two heatmaps: cell counts, and counts as a percentage of each row. The diagonal of the percentage heatmap is each class's recall.
 
 ![Validation confusion matrix](doc_images/validation_confusion_matrix.png)
 
@@ -602,7 +602,9 @@ To label a cell that is not in the queue, click it in the viewer. Ctrl-click (Cm
 **Toolbar buttons during review:**
 - **Previous** / **Next** / **Skip**: move through the queue.
 - **XGB: CD8 (87%)** (blue): accept Model 1's prediction.
-- **LGB: CD4 (65%)** (pink): accept Model 2's prediction. The two buttons are labelled XGB and LGB even if you chose Random Forest for either model.
+- **LGB: CD4 (65%)** (pink): accept Model 2's prediction.
+
+Each button starts with its model's type: **XGB** (XGBoost), **LGB** (LightGBM) or **RF** (Random Forest). If both models are the same type, the buttons read e.g. **RF 1** and **RF 2**.
 - **Both: CD8 (90%)**: shown instead of the two buttons when the models agree. The percentage is the mean of the two models' confidence.
 - **Avg: Treg** (green, no percentage): shown only when averaging the two models' probabilities gives a class that neither model chose. Click it to accept that class.
 - **All Classes ▼**: choose any other class.
@@ -772,9 +774,10 @@ cluster."* Click **Recompute** to cluster and draw the plot.
 
 > Clustering uses the normalisation set in **Clustering Normalisation**
 > (§[4.2](#42-clustering-normalisation)). The classifier always uses raw values. Each
-> marker is then z-scored over the cells being clustered. Set the normalisation before
-> you open this window: a plot keeps the normalisation it was built with, and
-> reopening it from the menu or clicking **New clustering session** does not update it.
+> marker is then z-scored over the cells being clustered. If you change the normalisation
+> while a plot exists, reopening the plot from the menu asks whether to build a new plot
+> with the new normalisation (the current clusters are discarded) or keep the existing
+> plot. **New clustering session** always uses the current normalisation.
 
 ### 11.1 Controls
 
@@ -972,7 +975,9 @@ the sample are assigned, see §[11.6](#116-clustering-method-k-means-vs-leiden).
 > **Staining differences between images.** Normalisation is applied per marker, not
 > per image. If one slide is stained brighter than the others, its cells can fall
 > into different clusters. Check the per-image intensity distributions before
-> pooling.
+> pooling, and use batch normalisation (§[19](#19-batch-normalisation-uniform)) with
+> **Use batch-corrected values** ticked to correct them. The scatter plot then uses the
+> corrected values in every scope and for every assign and write.
 
 **Leiden in project scope: Cluster all cells / Transfer from sample**
 
@@ -1131,7 +1136,7 @@ Tools for common cleanup tasks. Each one asks for its settings, then reports wha
 
 ### 13.1 Filter Cells by Size & Circularity
 
-Removes cell detections from the **current image** that fall outside size and shape limits. The dialog has **Min** and **Max** boxes for **Cell area (µm²)** and **Circularity (0–1)**. It opens with Max area = 500 and Min circularity = 0.7. Clear a box to remove that limit. A cell is removed if it breaks any limit (e.g. `area > 500` **or** `circularity < 0.7`). The tool uses the first measurement whose name contains "area" (or "circularity"). Check which one that is in your cell measurements: it may be a nucleus measurement rather than a whole-cell one. Cells missing either measurement are kept. The number of cells to be removed is shown before anything is deleted.
+Removes cell detections from the **current image** that fall outside size and shape limits. The dialog has a row for **Area** and a row for **Circularity (0–1)**. Each row has a **Measurement** dropdown and **Min** and **Max** boxes. The dropdowns list every measurement whose name contains "area" or "circularity" and start on the whole-cell measurement (`Cell: Area µm^2`, or `Cell: Area px^2` if the image is not calibrated, and `Cell: Circularity`). Change them to filter on, for example, nucleus area. Area limits are in the units of the chosen measurement. The dialog opens with Max area = 500 and Min circularity = 0.7. Clear a box to remove that limit. A cell is removed if it breaks any limit (e.g. `Cell: Area µm^2 > 500` **or** `Cell: Circularity < 0.7`). Cells missing a measurement that has a limit are kept. The number of cells to be removed is shown before anything is deleted.
 
 ### 13.2 Resolve Hierarchy
 

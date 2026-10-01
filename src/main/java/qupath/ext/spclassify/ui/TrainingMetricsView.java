@@ -20,6 +20,7 @@ import javafx.scene.text.Font;
 import javafx.stage.FileChooser;
 import javafx.stage.Modality;
 import javafx.stage.Stage;
+import qupath.ext.spclassify.classifier.ModelType;
 import qupath.ext.spclassify.classifier.TrainingMetrics;
 
 /**
@@ -43,6 +44,8 @@ public class TrainingMetricsView {
     private final TrainingMetrics m1Val;
     private final TrainingMetrics m2Train;
     private final TrainingMetrics m2Val;
+    private final String model1Label;
+    private final String model2Label;
 
     public TrainingMetricsView(
             Stage owner,
@@ -50,6 +53,20 @@ public class TrainingMetricsView {
             TrainingMetrics m1Val,
             TrainingMetrics m2Train,
             TrainingMetrics m2Val) {
+        this(owner, m1Train, m1Val, m2Train, m2Val, null, null);
+    }
+
+    /** As above, labelling each model with its actual type (default XGBoost / LightGBM when null). */
+    public TrainingMetricsView(
+            Stage owner,
+            TrainingMetrics m1Train,
+            TrainingMetrics m1Val,
+            TrainingMetrics m2Train,
+            TrainingMetrics m2Val,
+            ModelType model1Type,
+            ModelType model2Type) {
+        this.model1Label = ModelLabels.full(1, model1Type);
+        this.model2Label = ModelLabels.full(2, model2Type);
         this.m1Train = m1Train;
         this.m1Val = m1Val;
         this.m2Train = m2Train;
@@ -72,11 +89,12 @@ public class TrainingMetricsView {
         Button downloadBtn = new Button("Download CSV\u2026");
         downloadBtn.setOnAction(e -> exportCsv(owner));
 
-        // Validation confusion matrix (XGBoost) \u2014 the held-out, honest view.
+        // Validation confusion matrix for Model 1 \u2014 the held-out view.
         // Shown side-by-side as absolute + row-normalised heatmaps.
-        Button cmBtn = new Button("Validation Confusion Matrix (XGBoost)\u2026");
+        Button cmBtn = new Button("Validation Confusion Matrix ("
+                + ModelLabels.orDefault(1, model1Type).getDisplayName() + ")\u2026");
         cmBtn.setDisable(m1Val == null);
-        cmBtn.setOnAction(e -> new ValidationConfusionMatrixView(owner, "Model 1 (XGBoost)", m1Val).show());
+        cmBtn.setOnAction(e -> new ValidationConfusionMatrixView(owner, model1Label, m1Val).show());
 
         Button close = new Button("Close");
         close.setOnAction(e -> stage.close());
@@ -173,10 +191,10 @@ public class TrainingMetricsView {
         Path path = target.toPath();
         try (PrintWriter w = new PrintWriter(Files.newBufferedWriter(path))) {
             w.println("split,model,class,precision,recall,f1,support");
-            writeBlock(w, "Train", "Model 1 (XGBoost)", m1Train);
-            writeBlock(w, "Val", "Model 1 (XGBoost)", m1Val);
-            writeBlock(w, "Train", "Model 2 (LightGBM)", m2Train);
-            writeBlock(w, "Val", "Model 2 (LightGBM)", m2Val);
+            writeBlock(w, "Train", model1Label, m1Train);
+            writeBlock(w, "Val", model1Label, m1Val);
+            writeBlock(w, "Train", model2Label, m2Train);
+            writeBlock(w, "Val", model2Label, m2Val);
         } catch (IOException ex) {
             Alert a = new Alert(Alert.AlertType.ERROR, "Failed to write CSV: " + ex.getMessage());
             a.initOwner(stage);

@@ -113,7 +113,7 @@ Three buttons become available after training: **Agreement Confusion Matrix**, *
 
 #### Confusion Matrix (button)
 
-**Agreement Confusion Matrix** compares the two models' predictions for every cell. Rows are Model 1's predictions and columns are Model 2's. (The axis titles read `Model 1 (XGBoost)` and `Model 2 (LightGBM)` whichever model types you chose.)
+**Agreement Confusion Matrix** compares the two models' predictions for every cell. Rows are Model 1's predictions and columns are Model 2's. The axis titles name the model types you chose, e.g. `Model 1 (XGBoost)` and `Model 2 (LightGBM)`.
 
 - **Diagonal (blue):** cells where both models chose the same class.
 - **Off the diagonal (orange/red):** cells where the models chose different classes. Review mode samples from these cells.
@@ -146,7 +146,7 @@ Tick **Show 80% training-set rows (for over-fit diagnosis)** to also show the sc
 
 ![Training metrics](doc_images/training_metrics.png)
 
-**Validation Confusion Matrix (XGBoost)…** shows the true class (rows) against Model 1's predicted class (columns) for the same 20% of cells. It has two heatmaps: cell counts, and counts as a percentage of each row. The diagonal of the percentage heatmap is each class's recall.
+**Validation Confusion Matrix (XGBoost)…** (the name in brackets is Model 1's type) shows the true class (rows) against Model 1's predicted class (columns) for the same 20% of cells. It has two heatmaps: cell counts, and counts as a percentage of each row. The diagonal of the percentage heatmap is each class's recall.
 
 ![Validation confusion matrix](doc_images/validation_confusion_matrix.png)
 

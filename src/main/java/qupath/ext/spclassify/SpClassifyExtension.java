@@ -783,7 +783,8 @@ public class SpClassifyExtension implements QuPathExtension, BinaryClassifierMan
     }
 
     void showScatterPlot(QuPathGUI qupath) {
-        AnalysisViews.showScatterPlot(qupath, predAll, clusteringNormalizer, () -> showClassControl(qupath));
+        AnalysisViews.showScatterPlot(
+                qupath, () -> predAll, () -> clusteringNormalizer, () -> showClassControl(qupath));
     }
 
     void showCellularNeighborhoods(QuPathGUI qupath) {
@@ -1426,6 +1427,7 @@ public class SpClassifyExtension implements QuPathExtension, BinaryClassifierMan
         // Compute agreement rates if not yet available (for current image)
         if (predAll != null && predAll.size() > 0 && lastAgreementRates == null) {
             var confView = new ConfusionMatrixView(qupath.getStage(), predAll, classifier.getClassNames());
+            if (classifier != null) confView.setModelTypes(classifier.getModel1Type(), classifier.getModel2Type());
             lastAgreementRates = confView.getAgreementRates();
         }
 
@@ -1540,6 +1542,7 @@ public class SpClassifyExtension implements QuPathExtension, BinaryClassifierMan
         var channelSelector = new ChannelSelector(qupath, () -> cellTypeTable);
         var toolbar = new ReviewToolbar(reviewController, cellTypeTable, channelSelector);
         toolbar.setBinaryMarker(activeBinaryMarker, activeBinaryClassNames);
+        if (classifier != null) toolbar.setModelTypes(classifier.getModel1Type(), classifier.getModel2Type());
 
         // Build the review stage
         var vbox = new javafx.scene.layout.VBox(6);
@@ -1611,6 +1614,7 @@ public class SpClassifyExtension implements QuPathExtension, BinaryClassifierMan
             if (entry != null) imgName = entry.getImageName();
         }
         var view = new ConfusionMatrixView(qupath.getStage(), predAll, classNames, labelStore, qupath, imgName);
+        if (classifier != null) view.setModelTypes(classifier.getModel1Type(), classifier.getModel2Type());
         lastAgreementRates = view.getAgreementRates();
         view.show();
     }

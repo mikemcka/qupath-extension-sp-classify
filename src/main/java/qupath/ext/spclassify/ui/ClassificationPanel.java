@@ -1271,7 +1271,9 @@ public class ClassificationPanel extends VBox {
                         classifier.getModel1TrainMetrics(),
                         classifier.getModel1ValMetrics(),
                         classifier.getModel2TrainMetrics(),
-                        classifier.getModel2ValMetrics())
+                        classifier.getModel2ValMetrics(),
+                        classifier.getModel1Type(),
+                        classifier.getModel2Type())
                 .show();
     }
 
@@ -1296,6 +1298,7 @@ public class ClassificationPanel extends VBox {
             if (entry != null) imgName = entry.getImageName();
         }
         var view = new ConfusionMatrixView(qupath.getStage(), predAll, classNames, labelStore, qupath, imgName);
+        if (classifier != null) view.setModelTypes(classifier.getModel1Type(), classifier.getModel2Type());
         lastAgreementRates = view.getAgreementRates();
         if (onAgreementRatesChanged != null) onAgreementRatesChanged.accept(lastAgreementRates);
         view.show();
@@ -1349,6 +1352,7 @@ public class ClassificationPanel extends VBox {
         // If no confusion matrix has been shown yet, compute agreement rates now
         if (predAll != null && predAll.size() > 0 && lastAgreementRates == null) {
             var view = new ConfusionMatrixView(qupath.getStage(), predAll, classifier.getClassNames());
+            if (classifier != null) view.setModelTypes(classifier.getModel1Type(), classifier.getModel2Type());
             lastAgreementRates = view.getAgreementRates();
             if (onAgreementRatesChanged != null) onAgreementRatesChanged.accept(lastAgreementRates);
             view.show();
@@ -1410,6 +1414,7 @@ public class ClassificationPanel extends VBox {
             // Compute agreement rates for the current image if not yet available
             if (predAll != null && predAll.size() > 0 && lastAgreementRates == null) {
                 var confView = new ConfusionMatrixView(qupath.getStage(), predAll, classifier.getClassNames());
+                if (classifier != null) confView.setModelTypes(classifier.getModel1Type(), classifier.getModel2Type());
                 lastAgreementRates = confView.getAgreementRates();
                 if (onAgreementRatesChanged != null) onAgreementRatesChanged.accept(lastAgreementRates);
             }
@@ -1581,6 +1586,7 @@ public class ClassificationPanel extends VBox {
         // selector through syncPanelState → setCellTypeTable.
         var channelSelector = new ChannelSelector(qupath, () -> cellTypeTable);
         var toolbar = new ReviewToolbar(reviewController, cellTypeTable, channelSelector);
+        if (classifier != null) toolbar.setModelTypes(classifier.getModel1Type(), classifier.getModel2Type());
 
         var vbox = new javafx.scene.layout.VBox(6);
         vbox.setPadding(new javafx.geometry.Insets(6));

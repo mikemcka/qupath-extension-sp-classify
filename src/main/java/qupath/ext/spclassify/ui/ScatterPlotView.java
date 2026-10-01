@@ -45,6 +45,7 @@ import org.slf4j.LoggerFactory;
 import qupath.ext.spclassify.BatchCorrection;
 import qupath.ext.spclassify.model.AnnRecallException;
 import qupath.ext.spclassify.model.AnnotationCellFilter;
+import qupath.ext.spclassify.model.BatchShifts;
 import qupath.ext.spclassify.model.CellFeatureExtractor;
 import qupath.ext.spclassify.model.CohortClusterModel;
 import qupath.ext.spclassify.model.FeatureNormalizer;
@@ -211,6 +212,10 @@ public class ScatterPlotView {
     // same transformed values the classifier does. Captured at construction so the
     // sample fit and the cohort assign always use the same transform (nullable).
     private final FeatureNormalizer normalizer;
+    // UniFORM batch-correction gains (null when the preference is off or no fit exists), captured
+    // when the current rows are loaded and reused by every assign/write, so the fit and the
+    // assignment always use the same correction.
+    private volatile BatchShifts batchShifts;
 
     // ── UI ─────────────────────────────────────────────────────────────────────
     private final Stage stage;
@@ -846,6 +851,8 @@ public class ScatterPlotView {
             cluster[i] = -1;
         }
         var extractor = new CellFeatureExtractor(markerFeatures, normalizer);
+        batchShifts = BatchCorrection.loadIfEnabled(qupath.getProject());
+        BatchCorrection.applyTo(extractor, batchShifts, imageName);
         float[] flat = extractor.extractMatrix(used);
         raw = new double[n][nFeat];
         for (int i = 0; i < n; i++) {
@@ -922,6 +929,15 @@ public class ScatterPlotView {
      */
     public boolean isReusableFor(String name) {
         return scope == Scope.PROJECT || isForImage(name);
+    }
+
+    /**
+     * Whether this plot's cells were extracted with the same clustering normalisation as
+     * {@code current}. When not, its clusters were fitted on differently transformed values and a
+     * cohort assign/write would now mix the two.
+     */
+    public boolean usesNormalization(FeatureNormalizer current) {
+        return FeatureNormalizer.sameEffect(normalizer, current);
     }
 
     // ── Embedding + clustering (background thread) ──────────────────────────────
@@ -1490,6 +1506,7 @@ public class ScatterPlotView {
         // the fit applied PCA) -- NOT fitCentroids, which stays marker-space for the heatmap.
         final double[][] assignCents = fitAssignCentroids;
         final String classFilter = fitClassFilter;
+        final BatchShifts assignShifts = batchShifts; // same correction the fit used
         // Leiden cohort assign uses kNN label transfer against the labelled fitted
         // sample (Task 5); non-null exactly when the last Recompute used Leiden.
         final double[][] leidenRef = fitLeidenReference;
@@ -1530,6 +1547,7 @@ public class ScatterPlotView {
                                             mapping,
                                             classFilter,
                                             normalizer,
+                                            assignShifts,
                                             openData,
                                             openName,
                                             msg -> Platform.runLater(() -> statusLabel.setText(msg)),
@@ -1546,6 +1564,7 @@ public class ScatterPlotView {
                                             mapping,
                                             classFilter,
                                             normalizer,
+                                            assignShifts,
                                             openData,
                                             openName,
                                             msg -> Platform.runLater(() -> statusLabel.setText(msg)),
@@ -1828,6 +1847,8 @@ public class ScatterPlotView {
         final int[] leidenRefLabels = fitLeidenReferenceLabels;
         final int nClusters = fitNClusters;
         final String classFilter = fitClassFilter;
+        final BatchShifts shifts = batchShifts; // same correction the fit used
+        final String shiftsImageName = imageName;
         final java.util.function.UnaryOperator<double[][]> pcaProjector = fitPcaProjector;
 
         applying = true;
@@ -1845,7 +1866,9 @@ public class ScatterPlotView {
                                         new ArrayList<>(cellCol.isEmpty() ? hier.getDetectionObjects() : cellCol);
                                 int n = cells.size();
                                 int nFeat = markers.size();
-                                float[] flat = new CellFeatureExtractor(markers, normalizer).extractMatrix(cells);
+                                var imageExtractor = new CellFeatureExtractor(markers, normalizer);
+                                BatchCorrection.applyTo(imageExtractor, shifts, shiftsImageName);
+                                float[] flat = imageExtractor.extractMatrix(cells);
                                 boolean standardize = mean != null && sd != null;
 
                                 // Standardized feature matrix in the same space as the fit.
@@ -1960,6 +1983,7 @@ public class ScatterPlotView {
         final int[] leidenRefLabels = fitLeidenReferenceLabels;
         final int nClusters = fitNClusters;
         final String classFilter = fitClassFilter;
+        final BatchShifts assignShifts = batchShifts; // same correction the fit used
         final java.util.function.UnaryOperator<double[][]> pcaProjector = fitPcaProjector;
 
         applying = true;
@@ -1994,6 +2018,7 @@ public class ScatterPlotView {
                                             pcaProjector,
                                             classFilter,
                                             normalizer,
+                                            assignShifts,
                                             openData,
                                             openName,
                                             msg -> Platform.runLater(() -> statusLabel.setText(msg)),
@@ -2009,6 +2034,7 @@ public class ScatterPlotView {
                                             pcaProjector,
                                             classFilter,
                                             normalizer,
+                                            assignShifts,
                                             openData,
                                             openName,
                                             msg -> Platform.runLater(() -> statusLabel.setText(msg)),
@@ -2686,6 +2712,8 @@ public class ScatterPlotView {
         new Thread(
                         () -> {
                             try {
+                                BatchShifts sampleShifts = BatchCorrection.loadIfEnabled(project);
+                                batchShifts = sampleShifts;
                                 CohortClusterModel.SampleData sd = CohortClusterModel.sample(
                                         project,
                                         images,
@@ -2693,6 +2721,7 @@ public class ScatterPlotView {
                                         annoKeywords,
                                         cap,
                                         normalizer,
+                                        sampleShifts,
                                         msg -> Platform.runLater(() -> statusLabel.setText(msg)));
                                 if (sd.sampledCells() < 2) {
                                     Platform.runLater(() -> {

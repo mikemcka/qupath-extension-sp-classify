@@ -134,4 +134,40 @@ class FeatureNormalizerTest {
         var fn = new FeatureNormalizer();
         assertEquals(FeatureNormalizer.Transform.NONE, fn.getTransform("unknown"));
     }
+
+    // ── sameEffect ──────────────────────────────────────────────────────────
+
+    @Test
+    void sameEffectTreatsNullAndEmptyAsRaw() {
+        assertTrue(FeatureNormalizer.sameEffect(null, null));
+        assertTrue(FeatureNormalizer.sameEffect(null, new FeatureNormalizer()));
+        var n = new FeatureNormalizer();
+        n.setTransform("CD3: Cell: Mean", FeatureNormalizer.Transform.SQRT);
+        assertFalse(FeatureNormalizer.sameEffect(null, n));
+    }
+
+    @Test
+    void sameEffectComparesSettingsNotIdentity() {
+        var a = new FeatureNormalizer();
+        a.setTransform("CD3: Cell: Mean", FeatureNormalizer.Transform.ARCSINH);
+        a.setArcsinhCofactor(150);
+        var b = new FeatureNormalizer();
+        b.fromTransformMap(a.toTransformMap());
+        b.setArcsinhCofactor(150);
+        assertTrue(FeatureNormalizer.sameEffect(a, b));
+        b.setArcsinhCofactor(5);
+        assertFalse(FeatureNormalizer.sameEffect(a, b), "a different arcsinh cofactor changes the values");
+    }
+
+    @Test
+    void cofactorIsIgnoredWhenNoFeatureUsesArcsinh() {
+        var a = new FeatureNormalizer();
+        a.setTransform("CD3: Cell: Mean", FeatureNormalizer.Transform.SQRT);
+        var b = new FeatureNormalizer();
+        b.setTransform("CD3: Cell: Mean", FeatureNormalizer.Transform.SQRT);
+        b.setArcsinhCofactor(42);
+        assertTrue(FeatureNormalizer.sameEffect(a, b));
+        b.setTransform("CD8: Cell: Mean", FeatureNormalizer.Transform.SQRT);
+        assertFalse(FeatureNormalizer.sameEffect(a, b), "an extra transformed feature is a different normalisation");
+    }
 }

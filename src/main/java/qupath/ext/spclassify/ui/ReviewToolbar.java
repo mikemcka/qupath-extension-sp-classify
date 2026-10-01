@@ -7,6 +7,7 @@ import javafx.scene.control.*;
 import javafx.scene.layout.*;
 import javafx.scene.paint.Color;
 import javafx.scene.shape.Circle;
+import qupath.ext.spclassify.classifier.ModelType;
 import qupath.ext.spclassify.model.CellPrediction;
 import qupath.ext.spclassify.model.CellTypeTable;
 
@@ -15,7 +16,7 @@ import qupath.ext.spclassify.model.CellTypeTable;
  * prediction buttons, an "All Classes" dropdown, and a status/index indicator.
  *
  * <p>For <b>disagreement</b> cells the toolbar shows the top prediction from
- * each model (XGBoost &amp; LightGBM) as colour-coded buttons so the user can
+ * each model (labelled with its type, e.g. XGB / LGB / RF) as colour-coded buttons so the user can
  * quickly accept one.  For <b>agreement</b> cells a single "Both" button is
  * shown.  An "All Classes ▼" menu provides every class defined in the QuPath
  * project as a fallback.
@@ -42,6 +43,10 @@ public class ReviewToolbar extends HBox {
      * are offered as labelling choices (populated from saved state or labels).
      */
     private List<String> binaryClasses = null;
+    /** The classifier's model types, for the prediction button labels (null = default pair). */
+    private ModelType model1Type;
+
+    private ModelType model2Type;
 
     // Status widgets
     private final Label indexLabel = new Label();
@@ -235,14 +240,20 @@ public class ReviewToolbar extends HBox {
 
         if (pred.isDisagreement()) {
             // XGBoost top prediction
-            Button xgbBtn =
-                    new Button(String.format("XGB: %s (%.0f%%)", pred.getModel1Label(), pred.model1Confidence() * 100));
+            Button xgbBtn = new Button(String.format(
+                    "%s: %s (%.0f%%)",
+                    ModelLabels.shortPrefix(1, model1Type, model2Type),
+                    pred.getModel1Label(),
+                    pred.model1Confidence() * 100));
             xgbBtn.setStyle("-fx-background-color: #bbdefb; -fx-font-weight: bold; -fx-font-size: 11px;");
             xgbBtn.setOnAction(e -> assignAndAdvance(pred.getModel1Label()));
 
             // LightGBM top prediction
-            Button lgbBtn =
-                    new Button(String.format("LGB: %s (%.0f%%)", pred.getModel2Label(), pred.model2Confidence() * 100));
+            Button lgbBtn = new Button(String.format(
+                    "%s: %s (%.0f%%)",
+                    ModelLabels.shortPrefix(2, model2Type, model1Type),
+                    pred.getModel2Label(),
+                    pred.model2Confidence() * 100));
             lgbBtn.setStyle("-fx-background-color: #f8bbd0; -fx-font-weight: bold; -fx-font-size: 11px;");
             lgbBtn.setOnAction(e -> assignAndAdvance(pred.getModel2Label()));
 
@@ -272,6 +283,16 @@ public class ReviewToolbar extends HBox {
         refreshStatus();
         channelSelector.applyForCurrentCell(controller);
         if (!more) showCompleteAlert();
+    }
+
+    /**
+     * Label the per-model prediction buttons with the classifier's actual model types
+     * (XGB / LGB / RF; default XGB / LGB when null) and refresh the current cell's buttons.
+     */
+    public void setModelTypes(ModelType model1, ModelType model2) {
+        this.model1Type = model1;
+        this.model2Type = model2;
+        refreshStatus();
     }
 
     // ── All Classes menu ────────────────────────────────────────────────

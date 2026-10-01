@@ -139,4 +139,29 @@ public class FeatureNormalizer {
     public void clear() {
         transforms.clear();
     }
+
+    /**
+     * Whether two normalizers transform every feature identically. {@code null} and a normalizer
+     * with no transforms are equivalent (both mean raw values), and the arcsinh cofactor only
+     * matters when some feature uses arcsinh. Used to tell whether data extracted with one is still
+     * valid under the other, independent of object identity (the session normalizer is rebuilt
+     * from saved state on every image switch).
+     */
+    public static boolean sameEffect(FeatureNormalizer a, FeatureNormalizer b) {
+        Map<String, Transform> ta = effectiveTransforms(a);
+        Map<String, Transform> tb = effectiveTransforms(b);
+        if (!ta.equals(tb)) return false;
+        if (!ta.containsValue(Transform.ARCSINH)) return true;
+        return Double.compare(a.arcsinhCofactor, b.arcsinhCofactor) == 0;
+    }
+
+    private static Map<String, Transform> effectiveTransforms(FeatureNormalizer n) {
+        Map<String, Transform> out = new LinkedHashMap<>();
+        if (n != null) {
+            n.transforms.forEach((k, v) -> {
+                if (v != null && v != Transform.NONE) out.put(k, v);
+            });
+        }
+        return out;
+    }
 }

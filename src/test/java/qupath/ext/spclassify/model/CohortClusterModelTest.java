@@ -705,6 +705,83 @@ class CohortClusterModelTest {
                 "the z-scored column mean (≈0) must differ from the raw column mean (≈45) — raw ≠ z-scored");
     }
 
+    // ── Batch correction reaches the cohort write/sample paths ─────────────────
+
+    private static BatchShifts shiftsFor(String image, String marker, double scale) {
+        BatchShifts b = new BatchShifts();
+        b.markers = List.of(marker);
+        b.scaleByImage = java.util.Map.of(image, new double[] {scale});
+        return b;
+    }
+
+    @Test
+    void writeClusterAcrossProjectAppliesPerImageBatchScale() {
+        // One marker; centroids at 0 and 10. Raw value 4 is nearest 0 (label 0 → written 1.0);
+        // with a ×2 gain for this image it becomes 8, nearest 10 (label 1 → written 2.0).
+        List<String> markers = List.of("M1: Cell: Mean");
+        double[] mean = {0.0};
+        double[] sd = {1.0};
+        double[][] centroids = {{0.0}, {10.0}};
+
+        PathObject plain = detectionAt(0, 0);
+        plain.getMeasurementList().put("M1: Cell: Mean", 4.0);
+        var p1 = fakeProject(List.of(fakeEntry("img", fakeImageData(hierarchyWith(List.of(plain))))));
+        CohortClusterModel.writeClusterAcrossProject(
+                p1, List.of("img"), markers, mean, sd, centroids, null, null, null, null, null, null, m -> {}, f -> {});
+        assertEquals(1.0, plain.getMeasurementList().get(CohortClusterModel.CLUSTER_MEASUREMENT), 1e-9);
+
+        PathObject scaled = detectionAt(0, 0);
+        scaled.getMeasurementList().put("M1: Cell: Mean", 4.0);
+        var p2 = fakeProject(List.of(fakeEntry("img", fakeImageData(hierarchyWith(List.of(scaled))))));
+        CohortClusterModel.writeClusterAcrossProject(
+                p2,
+                List.of("img"),
+                markers,
+                mean,
+                sd,
+                centroids,
+                null,
+                null,
+                null,
+                shiftsFor("img", "M1: Cell: Mean", 2.0),
+                null,
+                null,
+                m -> {},
+                f -> {});
+        assertEquals(
+                2.0,
+                scaled.getMeasurementList().get(CohortClusterModel.CLUSTER_MEASUREMENT),
+                1e-9,
+                "the image's batch gain must be applied before the nearest-centroid assignment");
+    }
+
+    @Test
+    void sampleAppliesPerImageBatchScaleAndResetsBetweenImages() {
+        PathObject a = detectionAt(0, 0);
+        a.getMeasurementList().put("M1: Cell: Mean", 5.0);
+        PathObject b = detectionAt(0, 0);
+        b.getMeasurementList().put("M1: Cell: Mean", 5.0);
+        var project = fakeProject(List.of(
+                fakeEntry("scaled", fakeImageData(hierarchyWith(List.of(a)))),
+                fakeEntry("other", fakeImageData(hierarchyWith(List.of(b))))));
+
+        var sd = CohortClusterModel.sample(
+                project,
+                List.of("scaled", "other"),
+                List.of("M1: Cell: Mean"),
+                List.of(),
+                10,
+                null,
+                shiftsFor("scaled", "M1: Cell: Mean", 3.0),
+                m -> {});
+
+        assertEquals(2, sd.sampledCells());
+        java.util.Map<String, Double> bySource = new java.util.HashMap<>();
+        for (int i = 0; i < sd.sampledCells(); i++) bySource.put(sd.rowImage()[i], sd.raw()[i][0]);
+        assertEquals(15.0, bySource.get("scaled"), 1e-6, "×3 gain applied to the fitted image");
+        assertEquals(5.0, bySource.get("other"), 1e-6, "an image outside the fit keeps its raw value");
+    }
+
     // ── Fix 4: k-means cohort assignment must run in the queryProjector's space ─
 
     @Test
@@ -747,6 +824,7 @@ class CohortClusterModelTest {
                 null, // null projector == identity
                 null,
                 null,
+                null, // batch shifts
                 null,
                 null,
                 msg -> {},
@@ -773,6 +851,7 @@ class CohortClusterModelTest {
                 swapProjector,
                 null,
                 null,
+                null, // batch shifts
                 null,
                 null,
                 msg -> {},
@@ -804,6 +883,7 @@ class CohortClusterModelTest {
                 java.util.function.UnaryOperator.identity(),
                 null,
                 null,
+                null, // batch shifts
                 null,
                 null,
                 msg -> {},
