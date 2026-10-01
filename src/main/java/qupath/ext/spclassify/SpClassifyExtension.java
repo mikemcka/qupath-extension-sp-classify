@@ -35,6 +35,7 @@ import qupath.ext.spclassify.model.CellTypeTable;
 import qupath.ext.spclassify.model.FeatureNormalizer;
 import qupath.ext.spclassify.model.LabelStore;
 import qupath.ext.spclassify.model.PopulationSet;
+import qupath.ext.spclassify.ui.ChannelMappingDialog;
 import qupath.ext.spclassify.ui.ChannelSelector;
 import qupath.ext.spclassify.ui.ClassControlDialog;
 import qupath.ext.spclassify.ui.ClassificationPanel;
@@ -56,6 +57,7 @@ import qupath.lib.gui.QuPathGUI;
 import qupath.lib.gui.extensions.QuPathExtension;
 import qupath.lib.gui.prefs.PathPrefs;
 import qupath.lib.objects.PathObject;
+import qupath.lib.projects.Project;
 import qupath.lib.projects.ProjectImageEntry;
 
 /**
@@ -145,6 +147,12 @@ public class SpClassifyExtension implements QuPathExtension, BinaryClassifierMan
 
     /** Shared extension state — populated as the user works. */
     private CellTypeTable cellTypeTable;
+    /**
+     * The project {@link #cellTypeTable} was loaded for / saved to (null for a table imported with
+     * no project open). Lets a project switch drop the previous project's mapping instead of
+     * carrying it — and, worse, saving it — into a project that has none.
+     */
+    private Project<?> cellTypeTableProject;
 
     private LabelStore labelStore;
     private PopulationSet predAll;
@@ -284,6 +292,7 @@ public class SpClassifyExtension implements QuPathExtension, BinaryClassifierMan
         classificationPanel.setOnExitBinaryMode(() -> exitBinaryMode(qupath));
         classificationPanel.setOnApplyToImages(() -> applyBinaryClassifierToImages(qupath));
         classificationPanel.setOnManualLabelMode(() -> showManualLabelMode(qupath));
+        classificationPanel.setOnEditChannelMapping((owner, afterSave) -> showChannelMapping(qupath, owner, afterSave));
         classificationPanel.setOnFeatureImportance(() -> showFeatureImportance(qupath));
         classificationPanel.setOnClearImportedData(() -> clearImportedTrainingData(qupath));
         classificationPanel.setBinaryTargetImagesSupplier(
@@ -449,15 +458,22 @@ public class SpClassifyExtension implements QuPathExtension, BinaryClassifierMan
             this.predAll = null;
         }
 
+        // A table that belonged to a project does not outlive it (project closed, image opened
+        // stand-alone). A table imported with no project open is kept.
+        if (project == null && cellTypeTableProject != null) {
+            this.cellTypeTable = null;
+            this.cellTypeTableProject = null;
+        }
+
         // ── Try to restore feature selection and normalization from project state ──
         if (project != null) {
             try {
-                // Restore the persisted marker table (auto channel switching) so it
-                // survives QuPath restarts without re-importing the CSV.
-                CellTypeTable savedTable = ProjectStateManager.loadMarkerTable(project);
-                if (savedTable != null) {
-                    this.cellTypeTable = savedTable;
-                }
+                // Restore the persisted marker table / channel mapping so it survives QuPath
+                // restarts without re-importing the CSV. The project file is the source of
+                // truth (every import and editor save writes it), so adopt it even when absent:
+                // a project without a mapping must not inherit the previous project's.
+                this.cellTypeTable = ProjectStateManager.loadMarkerTable(project);
+                this.cellTypeTableProject = project;
                 // Only restore the multi-class session (feature selection, imported training
                 // rows, normalizer, classifier) when NOT in binary mode. In binary mode that
                 // state was loaded by enterBinaryMode for the active marker and is project/
@@ -1520,14 +1536,19 @@ public class SpClassifyExtension implements QuPathExtension, BinaryClassifierMan
             return;
         }
 
-        var channelSelector = new ChannelSelector(qupath, cellTypeTable);
+        // Supplier, not a snapshot: a mapping saved from the editor mid-review takes effect at once.
+        var channelSelector = new ChannelSelector(qupath, () -> cellTypeTable);
         var toolbar = new ReviewToolbar(reviewController, cellTypeTable, channelSelector);
         toolbar.setBinaryMarker(activeBinaryMarker, activeBinaryClassNames);
 
         // Build the review stage
         var vbox = new javafx.scene.layout.VBox(6);
         vbox.setPadding(new javafx.geometry.Insets(6));
-        vbox.getChildren().addAll(toolbar, channelSelector.getCheckBox(), channelSelector.getDisplayRangeCheckBox());
+        vbox.getChildren()
+                .addAll(
+                        toolbar,
+                        channelSelector.buildControls(owner -> showChannelMapping(
+                                qupath, owner, () -> channelSelector.applyForCurrentCell(reviewController))));
 
         double reviewScreenH =
                 javafx.stage.Screen.getPrimary().getVisualBounds().getHeight();
@@ -1598,10 +1619,60 @@ public class SpClassifyExtension implements QuPathExtension, BinaryClassifierMan
         ImportExport.exportCellTable(qupath);
     }
 
+    /** Open the channel-mapping editor from the menu. */
+    void showChannelMapping(QuPathGUI qupath) {
+        showChannelMapping(qupath, null, null);
+    }
+
+    /**
+     * Open the channel-mapping editor. On save the new table is adopted, pushed to the panel, and
+     * {@code afterSave} (e.g. re-apply channels for the cell under review) is run.
+     */
+    void showChannelMapping(QuPathGUI qupath, javafx.stage.Window owner, Runnable afterSave) {
+        ChannelMappingDialog.show(
+                qupath, owner, currentCellTypeTable(qupath), channelMappingClassNames(qupath), saved -> {
+                    cellTypeTable = saved;
+                    cellTypeTableProject = qupath.getProject();
+                    syncPanelState();
+                    if (afterSave != null) afterSave.run();
+                });
+    }
+
+    /** Classes offered by the editor: project classes, then any the classifier or labels know of. */
+    private List<String> channelMappingClassNames(QuPathGUI qupath) {
+        java.util.Set<String> names = new java.util.LinkedHashSet<>();
+        var project = qupath.getProject();
+        if (project != null) {
+            for (var pc : project.getPathClasses()) {
+                if (pc != null && pc.getName() != null && !pc.getName().isBlank()) names.add(pc.getName());
+            }
+        }
+        if (classifier != null && classifier.getClassNames() != null) names.addAll(classifier.getClassNames());
+        if (activeBinaryClassNames != null) names.addAll(activeBinaryClassNames);
+        if (labelStore != null) names.addAll(labelStore.getClassNames());
+        return new ArrayList<>(names);
+    }
+
+    /**
+     * The mapping for the project that is open now. Re-reads it if the in-memory table belongs to
+     * a different project (e.g. a project was opened but no image yet, so no image-change event
+     * has reloaded it).
+     */
+    private CellTypeTable currentCellTypeTable(QuPathGUI qupath) {
+        var project = qupath.getProject();
+        if (project != null && project != cellTypeTableProject) {
+            cellTypeTable = ProjectStateManager.loadMarkerTable(project);
+            cellTypeTableProject = project;
+            syncPanelState();
+        }
+        return cellTypeTable;
+    }
+
     void importMarkerTable(QuPathGUI qupath) {
         CellTypeTable imported = ImportExport.importMarkerTable(qupath);
         if (imported != null) {
             cellTypeTable = imported;
+            cellTypeTableProject = qupath.getProject();
             syncPanelState();
         }
     }

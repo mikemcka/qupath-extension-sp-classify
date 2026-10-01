@@ -24,7 +24,7 @@ Windows and boxes can be expanded or contracted by clicking and dragging corners
    - [4.1 Select features](#41-select-features)
    - [4.2 Clustering normalisation](#42-clustering-normalisation)
    - [4.3 Create classes & Class Control](#43-create-classes--class-control)
-   - [4.4 Import a marker table (auto channel switching)](#44-import-a-marker-table-auto-channel-switching)
+   - [4.4 Channel mapping for review (marker table)](#44-channel-mapping-for-review-marker-table)
 5. [Multi-class workflow in detail](#5-multi-class-workflow-in-detail)
 6. [Binary + composite workflow in detail](#6-binary--composite-workflow-in-detail)
 7. [After training — Review mode](#7-after-training--review-mode)
@@ -94,7 +94,7 @@ Build one classifier that distinguishes any number of cell types (e.g. T-cell / 
 ```
 Select Features  →  Clustering Normalisation  →  Create classes (Class Control)
        ↓
-Import Marker Table (optional, for auto channel switching)
+Channel Mapping (optional, for auto channel switching)
        ↓
 Manual Label Mode  → label ~20–50 cells across the open image
        ↓
@@ -245,28 +245,152 @@ Type a class name, click **Add Class**. Just adds it to QuPath's class panel —
 - Pick a class that was previously the merge target (the combo scans label files for `-mergedInto(...)` patterns).
 - **Undo Merge for Selected Class** — restores every label to its original name and re-adds the source `PathClass` to QuPath's class panel. The target class is **not** deleted; you can drop it from the Delete tab if you no longer want it.
 
-### 4.4 Import a marker table (auto channel switching)
+### 4.4 Channel mapping for review (marker table)
 
-**Menu:** *Extensions → SP Classify → Import ▸ Marker Table...*
+Optional. A **marker table** (also called the **channel mapping**) maps each cell type to the image channels that identify it, so [review mode](#7-after-training--review-mode) can auto-switch channel visibility to the channels relevant to each predicted cell — land on a predicted `CD4T` cell and the viewer can show the `CD4`/`CD3` channels automatically.
 
-Optional. Maps cell types to marker channels so review mode can auto-switch channel visibility to the markers relevant to each predicted cell.
+The recommended way to build and maintain it is the **Channel Mapping editor**. CSV import/export remains available for sharing a mapping between projects and for legacy tables.
 
-**Simple format:**
+**Menu:** *Extensions → SP Classify → Channel Mapping (Review Display)...* — or the **Edit channel mapping…** button in the Review Mode window, beneath the two auto-channel checkboxes.
+
+The editor needs an **open image**, because that image's channels are the choices you pick from
+(otherwise an error asks you to open one first). It is **non-modal**, so the viewer stays usable
+while it is open.
+
+- **Left — classes.** Your project's classes, plus any class the trained classifier or labels know
+  about, plus any marker-table entry that matches no class. Such an entry is shown in *italic* and
+  tagged **(not a project class)** — an *orphan*. Orphans are kept unless you **Clear** them. A CSV
+  entry whose name differs from a project class only in case, spacing or punctuation (e.g. `CD4 T`
+  vs `CD4T`) is merged into that class and saved under the project class's exact name.
+- **Right — channels.** The open image's channels as a filterable checklist, each shown with its
+  `(C1)`, `(C2)`… index. Tick the channels review should show for the selected class. A note above
+  the list explains the entry (it came from a CSV and how each name resolved, a gating rule was kept
+  unchanged, the entry was renamed, it is an orphan, some channels are not in this image, etc.).
+
+Each class carries a status glyph against the open image:
+
+| Glyph | Meaning |
+|---|---|
+| ✓ | Every channel matched exactly. |
+| ≈ | Matched, ignoring case / spacing / punctuation. |
+| ~ | Matched only by **partial** name — may be the wrong channel. Check it. |
+| ! | Some names match nothing in this image. |
+| ✗ | Nothing matches. |
+| – | No channels set — review leaves the display unchanged for that class. |
+
+Entries still driven by imported CSV marker names are tagged **[CSV]**.
+
+**Per-class buttons**
+
+- **Clear** — removes the class's mapping. For an orphan this deletes the entry; for a rule-format
+  entry, review falls back to the rule's markers.
+- **Pin matches** — replaces this entry's name-matched CSV markers with the exact channels they
+  currently resolve to. Names that match nothing are dropped and listed.
+- **Preview** — shows that class's channels in the viewer right now.
+
+**Bottom buttons**
+
+- **Import CSV…** — same formats as *Import ▸ Marker Table*. It replaces what the editor shows and is
+  **not saved until you press Save**. A summary reports *N exact, N approximate, N unmatched, N not
+  project classes*.
+- **Export CSV…** — writes the current mapping out (formats [below](#simple-format)).
+- **Pin all matches** — **Pin matches** for every entry at once.
+- **Save** — writes the mapping to the project. If review is running, the current cell's channels
+  are re-applied immediately.
+- **Cancel** — closes the editor; asks before discarding unsaved changes.
+
+**Scan project channels** reads every project image's channel names in the background (cancellable).
+Channels missing from some images are listed with `[n/N images]`; channels that exist only in other
+images are added to the list marked *not in this image*. Opening each image's server can take a
+while on big projects.
+
+**How many channels?** There is **no limit** per class (the old 5-marker cap is gone). Above 8 the
+editor shows a soft warning that the composite may be hard to read; it never blocks you.
+
+#### Fixing a CSV that picks the wrong channels
+
+1. Open an image and the editor, then **Import CSV…**.
+2. Look for `~`, `!` and `✗` rows — those matched only by partial name, only in part, or not at all.
+3. Select each such class and fix the ticks on the right.
+4. Click **Pin all matches** to lock the good matches to exact channels, then **Save**.
+
+#### Where it is stored
+
+The mapping is **per project**, saved to `<project>/celltune/marker-table.json`. It survives QuPath
+restarts, and each project keeps its own mapping: switching projects loads that project's mapping
+(a project without one starts empty). To reuse a mapping in another project, **Export CSV…** and
+**Import CSV…** it there.
+
+The file is now schema **version 2**, which adds an optional per-entry `channels` list holding the
+exact channel names you ticked. Older versions of the extension can still read it — they ignore the
+exact channels and use the markers.
+
+The two review checkboxes (**Auto-select channels during review** and **Auto-adjust brightness/contrast
+of shown channels**) remember their state across review windows and QuPath restarts.
+
+#### CSV import and export
+
+**Extensions ▸ SP Classify ▸ Import ▸ Marker Table...** is unchanged and both formats below still
+work (the editor's **Import CSV…** reads the same files). Reading is more forgiving than before:
+
+- Quoted fields may contain commas (RFC 4180).
+- The UTF-8 byte-order mark that Excel adds is ignored (it previously broke rule-format CSVs).
+- Extra columns that aren't described below are ignored.
+
+##### Simple format
+
+A CSV with `Marker1`–`Marker5` columns, plus any further columns whose header starts with
+`Marker` (`Marker6`, `Marker7`, …) — there is no upper limit. Trailing columns may be left blank.
+Exports widen to as many `MarkerN` columns as needed (at least 5). A ready-to-edit example
+lives at
+[`examples/marker-table-example.csv`](https://github.com/mikemcka/qupath-extension-sp-classify/blob/main/examples/marker-table-example.csv).
 
 ```csv
-CellType,Marker1,Marker2,Marker3
-T-Cell,CD3,,
-B-Cell,CD20,,
-Macrophage,CD68,CD163,
-Dendritic,CD11c,,
-NK-Cell,CD56,,
+CellType,Marker1,Marker2,Marker3,Marker4,Marker5
+CD4T,CD4,CD3,,,
+CD8T,CD8,CD3,,,
+Treg,CD4,CD25,FOXP3,CD3,
+Bcell,CD20,CD19,,,
+Macrophage,CD68,CD163,CD11b,,
 ```
 
-Channel-name matching is robust (alphanumeric-normalised), so `CD3_S2 - Cy5_AF` matches the channel `CD3_S2-Cy5_AF` automatically.
+##### How names are matched
 
-In review mode, ticking the **Auto-select channels during review** checkbox makes QuPath show only the relevant markers for the cell currently under review. Untick it to navigate channels manually. A second, smaller tick-box — **Auto-adjust brightness/contrast of shown channels** — is **off by default**: tick it if you also want each shown channel's display range (brightness/contrast) re-adjusted automatically each time you move to a new cell. Left unticked, only channel *visibility* switches and your own brightness/contrast settings are preserved. (It only takes effect while auto-select is on, so it is greyed out otherwise.)
+> **Matching is tolerant — but the `CellType` column should track your class names**
+>
+> The `CellType` column should match the class names you assign to labelled cells. Matching is
+> **case-, spacing-, and punctuation-insensitive**, so `CD4 T`, `cd4t`, and `CD4-T` are treated
+> as the same type. `Marker` names are matched to image channels the same way, so a channel
+> named `CD3 (Opal 570)` still matches the marker `CD3`.
+>
+> If a predicted type isn't found in the table, or none of its markers match any channel, the
+> viewer's channels are **left unchanged** (nothing is hidden).
+>
+> Matching uses the image's **own channel names**. Earlier versions matched against QuPath's
+> display names, which append ` (C<n>)` (e.g. `CD3 (C4)`), so exact matches rarely fired and `CD3`
+> could also light up `CD31`. If a table ever showed the wrong channels, re-check it in the
+> editor. Names typed as display names (with the `(C4)` suffix) still work.
+>
+> Exact channels chosen in the editor are matched **verbatim first**; if an image lacks that exact
+> name, the usual tolerant matching is used. So a mapping made on one image works on others whose
+> channel names are the same, or cosmetically different. Channels stored in the mapping but absent
+> from the current image are kept, not discarded.
 
-> The marker table is saved to `<project>/celltune/marker-table.json` when you import it, so it persists across QuPath restarts — no need to re-import. Importing a new CSV overwrites it.
+##### Rule format (gating)
+
+The importer also accepts a **rule format** for composite gating, auto-detected from a
+`PrimaryMarker` column. See **[Binary + composite workflow](#6-binary--composite-workflow-in-detail)** for how gating
+rules are written and applied.
+
+```csv
+CellType,PrimaryMarker,SecondaryMarker,TertiaryMarker
+CD8T,CD8&CD3,CD45,CD103|CD45RA
+Macrophage,CD68|CD163|CD206,,CD14|CD38|VIM
+```
+
+The rule format may also carry an optional `DisplayChannels` column — **pipe-separated exact
+channel names** — which *Export* writes when exact channels exist. Older versions of the extension
+ignore it.
 
 ---
 
@@ -540,7 +664,16 @@ The toolbar header also shows the **name(s) of the annotation region(s)** the cu
 
 Switching to a **different image** while a classifier is trained **auto-applies** its predictions to that image first, so you can review it immediately without a separate predict step.
 
-If you imported a marker table (§4.4), tick **Auto-select channels during review** and the viewer will display only the markers relevant to whatever class the current cell was predicted as. The separate **Auto-adjust brightness/contrast of shown channels** box (off by default) additionally auto-sets each shown channel's display range per cell; leave it unticked to keep your own brightness/contrast.
+If you have set up a channel mapping (§[4.4](#44-channel-mapping-for-review-marker-table)), tick **Auto-select channels during review** and the viewer will display only the channels mapped to whatever class the current cell was predicted as. The separate **Auto-adjust brightness/contrast of shown channels** box (off by default) additionally auto-sets each shown channel's display range per cell; leave it unticked to keep your own brightness/contrast. Both checkboxes remember their state across review windows and QuPath restarts.
+
+Beneath the checkboxes, an **Edit channel mapping…** button opens the [Channel Mapping editor](#44-channel-mapping-for-review-marker-table) (non-modal, so you can keep reviewing), and a **status line** says what the current cell is showing:
+
+- `CD8T → CD8, CD3` — the channels now displayed for the cell's class.
+- `No channels mapped for "X"` — that class has no mapping; the display is left alone.
+- `No channel in this image matches "X"'s mapping — display unchanged` (red) — the mapping names channels this image doesn't have.
+- `No channel mapping set — use Edit channel mapping…` — nothing is set up yet.
+
+Saving in the editor during review re-applies the channels to the current cell immediately.
 
 After review, click **Train** again — the new labels feed into the next cycle.
 
@@ -1216,6 +1349,7 @@ All under *Extensions → SP Classify*.
 | Binary Classifiers... | Project | Open the binary classifier manager (create/open/delete per-marker classifiers). |
 | Composite Classification... | Project + ≥1 trained binary | Apply trained binary classifiers and assign composite labels. |
 | Class Control... | Project | Add/Delete/Merge/Undo Merge classes. |
+| Channel Mapping (Review Display)... | Open image | Edit which image channels review shows for each class (per-project, with CSV import/export). See [§4.4](#44-channel-mapping-for-review-marker-table). |
 | Select Features... | Project | Pick which measurement columns are used for training. |
 | Clustering Normalisation | Project | Per-feature arcsinh/sqrt with shared cofactor (clustering-only; classifier uses raw). |
 | Batch Normalisation... | Project | UniFORM per-image marker-intensity alignment across a cohort; fit + QC, streamed into clustering + ML or written as `(batchnorm)` columns. See §[19](#19-batch-normalisation-uniform). |
@@ -1227,7 +1361,7 @@ All under *Extensions → SP Classify*.
 | Export ▸ Cell Table... | Open image with detections | One CSV per selected image. |
 | Export ▸ Ground Truth... | Open image with labels (multi-class) | Portable labels + feature vectors CSV. |
 | Export ▸ Active Binary Ground Truth... | Binary mode active + open image with labels | Same as above, scoped to active marker. |
-| Import ▸ Marker Table... | Open image | Load cell-type → markers mapping for review channel switching. |
+| Import ▸ Marker Table... | Open image | Load a cell-type → markers CSV for review channel switching (the Channel Mapping editor, [§4.4](#44-channel-mapping-for-review-marker-table), is the recommended way to edit it). |
 | Import ▸ Ground Truth... | Open image (multi-class) | Spatial-match or training-data-only mode. |
 | Import ▸ Active Binary Ground Truth... | Binary mode active + open image | Same as above, scoped to active marker. |
 | Utility Scripts ▸ Filter Cells by Size & Circularity... | Open image with cells | Remove cells outside optional area/circularity bounds (current image). See §[13.1](#131-filter-cells-by-size--circularity). |
@@ -1247,7 +1381,7 @@ Everything the extension writes is under `<project>/celltune/`:
 celltune/
 ├── classifier-state.json         # Multi-class model (features, classes, model bytes, labels, normalisation)
 ├── composite-rules.json          # Saved CompositeClassificationRule objects (advanced/programmatic)
-├── marker-table.json             # Imported marker table (auto channel switching) — persists across restarts
+├── marker-table.json             # Channel mapping for review (markers + exact channels, schema v2) — per project, persists across restarts
 ├── binary-registry.json          # markerName → state file path
 ├── labels_backup_YYYYMMDD_HHMMSS.json   # Auto-snapshot before each Train
 │
@@ -1578,7 +1712,8 @@ Two independent options:
 - **Pick different model types for Model 1 and Model 2.** Two XGBoosts won't disagree much, which kills the whole point.
 - **Images at once caps at 8.** Expect ~2–4 GB of memory per image on COMET data. It's a different thing from **CPU threads** — see §5.3.
 - **If training feels slow, read the log first.** Every run ends with a "Where the time went" table in `<project>/celltune/logs/`. It tells you which step to actually do something about instead of guessing.
-- **The marker table persists per project.** On import it's saved to `<project>/celltune/marker-table.json` and reloaded automatically when you reopen the project, so auto-channel-switching during review survives QuPath restarts — no re-import needed. (*Reset Project State* clears it along with the rest of the `celltune/` folder.)
+- **The channel mapping persists per project.** It's saved to `<project>/celltune/marker-table.json` (from the Channel Mapping editor or a CSV import) and reloaded automatically when you reopen the project, so auto-channel-switching during review survives QuPath restarts — no re-import needed. Each project keeps its own; to reuse one elsewhere, *Export CSV…* and import it in the other project. (*Reset Project State* clears it along with the rest of the `celltune/` folder.)
+- **Fixing a CSV that picks the wrong channels.** Open *Channel Mapping (Review Display)...*, **Import CSV…**, look for `~` / `!` / `✗` rows, fix the ticks, **Pin all matches**, **Save**. Details in [§4.4](#44-channel-mapping-for-review-marker-table).
 - **Project Prediction Summary needs ≥5 images** to give meaningful robust z-scores. On 2–3 image projects, treat the Anomaly column as overview or guide.
 - **Composite class colours.** Without "Prepend primary", QuPath generates a colour per unique composite name — you can end up with hundreds. Tick "Prepend primary" and your existing multi-class palette is preserved.
 - **No `.qpdata` save** when navigating from Project Prediction Summary — this is deliberate (saving large slides is slow and pointless for navigation). Manually save the image after editing it.

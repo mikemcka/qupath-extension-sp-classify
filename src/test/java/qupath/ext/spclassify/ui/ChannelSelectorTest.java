@@ -63,4 +63,38 @@ class ChannelSelectorTest {
         assertTrue(ChannelSelector.selectChannelIndices(null, List.of("CD3")).isEmpty());
         assertTrue(ChannelSelector.selectChannelIndices(List.of("CD3"), null).isEmpty());
     }
+
+    // ── resolveIndices: original vs display names ─────────────────────────────
+
+    /** QuPath's display names append " (C<n>)" to each server channel name. */
+    private static final List<String> ORIGINAL = List.of("DAPI", "CD3", "CD31", "CD8");
+
+    private static final List<String> DISPLAY = List.of("DAPI (C1)", "CD3 (C2)", "CD31 (C3)", "CD8 (C4)");
+
+    @Test
+    void displaySuffixNoLongerMakesCd3LightUpCd31() {
+        // Against display names, "cd3" is only a substring of both "cd3c2" and "cd31c3".
+        assertEquals(Set.of(1, 2), ChannelSelector.selectChannelIndices(DISPLAY, List.of("CD3")));
+        // Matching on the image's own names picks just CD3.
+        assertEquals(Set.of(1), ChannelSelector.resolveIndices(ORIGINAL, DISPLAY, List.of("CD3"), false));
+    }
+
+    @Test
+    void namesCopiedFromTheDisplayStillMatchViaFallback() {
+        assertEquals(Set.of(3), ChannelSelector.resolveIndices(ORIGINAL, DISPLAY, List.of("CD8 (C4)"), false));
+    }
+
+    @Test
+    void exactFirstPicksOnlyTheVerbatimChannel() {
+        var original = List.of("CD3", "cd3", "CD8");
+        assertEquals(Set.of(0, 1), ChannelSelector.resolveIndices(original, null, List.of("CD3"), false));
+        assertEquals(Set.of(0), ChannelSelector.resolveIndices(original, null, List.of("CD3"), true));
+    }
+
+    @Test
+    void exactFirstFallsBackForAChannelNamedDifferentlyOnThisImage() {
+        assertEquals(
+                Set.of(1),
+                ChannelSelector.resolveIndices(List.of("DAPI", "CD8 Opal520"), null, List.of("CD8_Opal520"), true));
+    }
 }

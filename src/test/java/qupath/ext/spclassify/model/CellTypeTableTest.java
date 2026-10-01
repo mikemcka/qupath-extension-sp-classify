@@ -103,10 +103,18 @@ class CellTypeTableTest {
     }
 
     @Test
-    void markersAreCappedAtMaxMarkers() {
+    void markersAreNoLongerCapped() {
         var tbl = new CellTypeTable();
         tbl.put("BigType", List.of("M1", "M2", "M3", "M4", "M5", "M6", "M7"));
-        assertTrue(tbl.getMarkers("BigType").size() <= CellTypeTable.MAX_MARKERS);
+        assertEquals(7, tbl.getMarkers("BigType").size());
+    }
+
+    @Test
+    void ruleDerivedDisplayMarkersStayCapped() {
+        // The rule-format derivation is unchanged legacy behaviour.
+        var tbl = new CellTypeTable();
+        tbl.putRule("X", "A|B|C|D|E|F|G", null, null);
+        assertEquals(CellTypeTable.MAX_MARKERS, tbl.getMarkers("X").size());
     }
 
     // ── rule format (in-memory API) ───────────────────────────────────────────
@@ -256,5 +264,159 @@ class CellTypeTableTest {
         assertEquals("CD45", loaded.getSecondaryMarkers("CD4T"));
         assertEquals("CD68|CD163", loaded.getPrimaryExpression("Macro"));
         assertEquals("VIM", loaded.getTertiaryMarkers("Macro"));
+    }
+
+    // ── exact channels ────────────────────────────────────────────────────────
+
+    @Test
+    void putChannelsSetsExactChannelsAndDisplayMarkersForSimpleTables() {
+        var tbl = new CellTypeTable();
+        tbl.putChannels("CD8T", List.of("CD8 (Opal 520)", " CD3 ", "", "CD8 (Opal 520)"));
+        assertEquals(List.of("CD8 (Opal 520)", "CD3"), tbl.getChannels("CD8T"));
+        assertEquals(List.of("CD8 (Opal 520)", "CD3"), tbl.getMarkers("CD8T"));
+        assertTrue(tbl.hasChannels("CD8T"));
+        assertTrue(tbl.hasAnyChannels());
+        assertFalse(tbl.hasGatingRules());
+    }
+
+    @Test
+    void getChannelsUsesTheTolerantClassLookup() {
+        var tbl = new CellTypeTable();
+        tbl.putChannels("CD8 T", List.of("CD8"));
+        assertEquals(List.of("CD8"), tbl.getChannels("cd8t"));
+        assertEquals("CD8 T", tbl.resolveKey("CD8-T"));
+        assertNull(tbl.resolveKey("Bcell"));
+    }
+
+    @Test
+    void emptyPutChannelsRemovesThem() {
+        var tbl = new CellTypeTable();
+        tbl.putChannels("T", List.of("CD3"));
+        tbl.putChannels("T", List.of());
+        assertFalse(tbl.hasChannels("T"));
+        assertEquals(List.of("CD3"), tbl.getMarkers("T"));
+    }
+
+    @Test
+    void putChannelsOnARuleTableLeavesTheRuleAlone() {
+        var tbl = new CellTypeTable();
+        tbl.putRule("CD8T", "CD8&CD3", "CD45", null);
+        tbl.putChannels("CD8T", List.of("CD8", "CD3", "CD103"));
+        tbl.putChannels("NewType", List.of("CD20"));
+        assertEquals("CD8&CD3", tbl.getPrimaryExpression("CD8T"));
+        assertEquals("CD45", tbl.getSecondaryMarkers("CD8T"));
+        assertEquals(List.of("CD8", "CD3"), tbl.getMarkers("CD8T"));
+        assertEquals(List.of("CD8", "CD3", "CD103"), tbl.getChannels("CD8T"));
+        assertTrue(tbl.getCellTypes().contains("NewType"));
+        assertNull(tbl.getPrimaryExpression("NewType"));
+        assertTrue(tbl.hasGatingRules());
+    }
+
+    // ── CSV robustness ────────────────────────────────────────────────────────
+
+    @Test
+    void excelByteOrderMarkIsIgnored() throws IOException {
+        Path csv = tempDir.resolve("bom.csv");
+        Files.writeString(csv, "\uFEFFCellType,PrimaryMarker,SecondaryMarker,TertiaryMarker\nCD8T,CD8&CD3,,\n");
+        var tbl = CellTypeTable.loadFromCSV(csv); // used to throw: no 'CellType' column
+        assertEquals("CD8&CD3", tbl.getPrimaryExpression("CD8T"));
+    }
+
+    @Test
+    void quotedFieldsMayContainCommas() throws IOException {
+        Path csv = tempDir.resolve("quoted.csv");
+        Files.writeString(csv, "CellType,Marker1,Marker2\n\"T, helper\",\"CD4, Opal 520\",CD3\n");
+        var tbl = CellTypeTable.loadFromCSV(csv);
+        assertEquals(List.of("CD4, Opal 520", "CD3"), tbl.getMarkers("T, helper"));
+    }
+
+    @Test
+    void parseCsvLineMatchesSplitForUnquotedLines() {
+        String line = "T-Cell, CD3 ,,CD4,";
+        assertArrayEquals(line.split(",", -1), CellTypeTable.parseCsvLine(line));
+        assertArrayEquals(new String[] {"a\"b", "c"}, CellTypeTable.parseCsvLine("\"a\"\"b\",c"));
+    }
+
+    @Test
+    void namedMarkerColumnsBeyondFiveAreRead() throws IOException {
+        Path csv = tempDir.resolve("wide.csv");
+        Files.writeString(csv, "CellType,Marker1,Marker2,Marker3,Marker4,Marker5,Marker6,Marker7\nBig,A,B,C,D,E,F,G\n");
+        assertEquals(
+                List.of("A", "B", "C", "D", "E", "F", "G"),
+                CellTypeTable.loadFromCSV(csv).getMarkers("Big"));
+    }
+
+    @Test
+    void unnamedExtraColumnsBeyondFiveAreStillIgnored() throws IOException {
+        Path csv = tempDir.resolve("hex.csv");
+        Files.writeString(csv, "CellType,Marker1,Marker2,Marker3,Marker4,Marker5,hex\nT,A,,,,,#ff0000\n");
+        assertEquals(List.of("A"), CellTypeTable.loadFromCSV(csv).getMarkers("T"));
+    }
+
+    @Test
+    void legacySimpleExportIsByteIdentical() throws IOException {
+        var tbl = new CellTypeTable();
+        tbl.put("T-Cell", List.of("CD3", "CD4"));
+        tbl.put("NK", List.of("CD56"));
+        Path csv = tempDir.resolve("legacy.csv");
+        tbl.saveToCSV(csv);
+        String nl = System.lineSeparator();
+        assertEquals(
+                "CellType,Marker1,Marker2,Marker3,Marker4,Marker5" + nl + "T-Cell,CD3,CD4,,," + nl + "NK,CD56,,,," + nl,
+                Files.readString(csv));
+    }
+
+    @Test
+    void legacyRuleExportIsByteIdentical() throws IOException {
+        var tbl = new CellTypeTable();
+        tbl.putRule("CD8T", "CD8&CD3", "CD45", null);
+        Path csv = tempDir.resolve("legacy_rules.csv");
+        tbl.saveToCSV(csv);
+        String nl = System.lineSeparator();
+        assertEquals(
+                "CellType,PrimaryMarker,SecondaryMarker,TertiaryMarker" + nl + "CD8T,CD8&CD3,CD45," + nl,
+                Files.readString(csv));
+    }
+
+    @Test
+    void wideSimpleTableExportsAndReloads() throws IOException {
+        var tbl = new CellTypeTable();
+        List<String> many = List.of("C1", "C2", "C3", "C4", "C5", "C6", "C7");
+        tbl.putChannels("Big", many);
+        tbl.put("Small", List.of("CD3"));
+        Path csv = tempDir.resolve("wide_out.csv");
+        tbl.saveToCSV(csv);
+        assertTrue(Files.readAllLines(csv).get(0).endsWith(",Marker7"));
+        var loaded = CellTypeTable.loadFromCSV(csv);
+        assertEquals(many, loaded.getMarkers("Big"));
+        assertEquals(List.of("CD3"), loaded.getMarkers("Small"));
+    }
+
+    @Test
+    void namesWithCommasRoundTripThroughCsv() throws IOException {
+        var tbl = new CellTypeTable();
+        tbl.putChannels("T, helper", List.of("CD4, Opal 520", "CD3 \"bright\""));
+        Path csv = tempDir.resolve("commas.csv");
+        tbl.saveToCSV(csv);
+        assertEquals(
+                List.of("CD4, Opal 520", "CD3 \"bright\""),
+                CellTypeTable.loadFromCSV(csv).getMarkers("T, helper"));
+    }
+
+    @Test
+    void ruleTableDisplayChannelsRoundTripThroughCsv() throws IOException {
+        var tbl = new CellTypeTable();
+        tbl.putRule("CD8T", "CD8&CD3", null, "CD103");
+        tbl.putChannels("CD8T", List.of("CD8 (Opal 520)", "CD3"));
+        tbl.putRule("Plasma", "CD38", null, null);
+        Path csv = tempDir.resolve("rules_channels.csv");
+        tbl.saveToCSV(csv);
+        assertTrue(Files.readAllLines(csv).get(0).endsWith(",DisplayChannels"));
+
+        var loaded = CellTypeTable.loadFromCSV(csv);
+        assertEquals("CD8&CD3", loaded.getPrimaryExpression("CD8T"));
+        assertEquals("CD103", loaded.getTertiaryMarkers("CD8T"));
+        assertEquals(List.of("CD8 (Opal 520)", "CD3"), loaded.getChannels("CD8T"));
+        assertFalse(loaded.hasChannels("Plasma"));
     }
 }

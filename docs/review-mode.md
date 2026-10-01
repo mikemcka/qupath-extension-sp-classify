@@ -35,7 +35,16 @@ The toolbar header also shows the **name(s) of the annotation region(s)** the cu
 
 Switching to a **different image** while a classifier is trained **auto-applies** its predictions to that image first, so you can review it immediately without a separate predict step.
 
-If you imported a marker table (§4.4), tick **Auto-select channels during review** and the viewer will display only the markers relevant to whatever class the current cell was predicted as. The separate **Auto-adjust brightness/contrast of shown channels** box (off by default) additionally auto-sets each shown channel's display range per cell; leave it unticked to keep your own brightness/contrast.
+If you have set up a channel mapping (§[4.4](setup.md#44-channel-mapping-for-review-marker-table)), tick **Auto-select channels during review** and the viewer will display only the channels mapped to whatever class the current cell was predicted as. The separate **Auto-adjust brightness/contrast of shown channels** box (off by default) additionally auto-sets each shown channel's display range per cell; leave it unticked to keep your own brightness/contrast. Both checkboxes remember their state across review windows and QuPath restarts.
+
+Beneath the checkboxes, an **Edit channel mapping…** button opens the [Channel Mapping editor](marker-table.md) (non-modal, so you can keep reviewing), and a **status line** says what the current cell is showing:
+
+- `CD8T → CD8, CD3` — the channels now displayed for the cell's class.
+- `No channels mapped for "X"` — that class has no mapping; the display is left alone.
+- `No channel in this image matches "X"'s mapping — display unchanged` (red) — the mapping names channels this image doesn't have.
+- `No channel mapping set — use Edit channel mapping…` — nothing is set up yet.
+
+Saving in the editor during review re-applies the channels to the current cell immediately.
 
 After review, click **Train** again — the new labels feed into the next cycle.
 

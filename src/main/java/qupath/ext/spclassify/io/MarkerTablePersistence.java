@@ -22,6 +22,13 @@ import qupath.lib.projects.Project;
  * Both CSV formats are preserved losslessly: simple tables store their display markers,
  * rule tables store their primary/secondary/tertiary gating expressions.
  * <p>
+ * <b>Schema history.</b> v1 entries hold {@code cellType} plus either {@code markers} or the
+ * rule expressions. v2 adds an optional, uncapped {@code channels} array per entry — the exact
+ * image channel names chosen in the channel-mapping editor. Every v1 field is still written, so
+ * a build that only understands v1 still loads a v2 file (it logs a version warning, ignores
+ * {@code channels} and falls back to the {@code markers} / rule-derived display markers); and
+ * a v1 file loads here unchanged.
+ * <p>
  * Extracted verbatim from {@link ProjectStateManager}; the public API there delegates
  * here so existing call sites are unaffected. Shares
  * {@link ProjectStateManager#getCellTuneDir(Project)} and {@code GSON} with its siblings
@@ -31,7 +38,7 @@ final class MarkerTablePersistence {
 
     private static final Logger logger = LoggerFactory.getLogger(MarkerTablePersistence.class);
     private static final String MARKER_TABLE_FILENAME = "marker-table.json";
-    private static final int MARKER_TABLE_SCHEMA_VERSION = 1;
+    private static final int MARKER_TABLE_SCHEMA_VERSION = 2;
 
     private MarkerTablePersistence() {} // utility class
 
@@ -72,6 +79,12 @@ final class MarkerTablePersistence {
                     markers.add(marker);
                 }
                 entry.add("markers", markers);
+            }
+            List<String> channels = table.getChannels(cellType);
+            if (!channels.isEmpty()) {
+                JsonArray arr = new JsonArray();
+                for (String ch : channels) arr.add(ch);
+                entry.add("channels", arr);
             }
             entries.add(entry);
         }
@@ -119,9 +132,12 @@ final class MarkerTablePersistence {
         if (rawVersion != null
                 && rawVersion.isJsonPrimitive()
                 && rawVersion.getAsJsonPrimitive().isNumber()
-                && rawVersion.getAsInt() != MARKER_TABLE_SCHEMA_VERSION) {
+                && rawVersion.getAsInt() > MARKER_TABLE_SCHEMA_VERSION) {
+            // Older versions are read as-is (every field they had is still understood); a newer
+            // one may carry fields this build ignores, so say so rather than fail.
             logger.warn(
-                    "loadMarkerTable: schema version {} in {} (expected {})",
+                    "loadMarkerTable: schema version {} in {} is newer than this build supports ({}); "
+                            + "unknown fields are ignored",
                     rawVersion.getAsInt(),
                     path,
                     MARKER_TABLE_SCHEMA_VERSION);
@@ -152,17 +168,10 @@ final class MarkerTablePersistence {
                         getOptionalString(entry, "secondary"),
                         getOptionalString(entry, "tertiary"));
             } else {
-                List<String> markers = new ArrayList<>();
-                JsonElement rawMarkers = entry.get("markers");
-                if (rawMarkers != null && rawMarkers.isJsonArray()) {
-                    for (JsonElement m : rawMarkers.getAsJsonArray()) {
-                        if (m.isJsonPrimitive() && m.getAsJsonPrimitive().isString()) {
-                            markers.add(m.getAsString());
-                        }
-                    }
-                }
-                table.put(cellType, markers);
+                table.put(cellType, getStringArray(entry, "markers"));
             }
+            List<String> channels = getStringArray(entry, "channels");
+            if (!channels.isEmpty()) table.putChannels(cellType, channels);
         }
 
         if (table.isEmpty()) {
@@ -174,6 +183,19 @@ final class MarkerTablePersistence {
                 hasRules ? "rule" : "simple",
                 path);
         return table;
+    }
+
+    private static List<String> getStringArray(JsonObject obj, String key) {
+        List<String> out = new ArrayList<>();
+        JsonElement raw = obj.get(key);
+        if (raw != null && raw.isJsonArray()) {
+            for (JsonElement m : raw.getAsJsonArray()) {
+                if (m.isJsonPrimitive() && m.getAsJsonPrimitive().isString()) {
+                    out.add(m.getAsString());
+                }
+            }
+        }
+        return out;
     }
 
     private static String getOptionalString(JsonObject obj, String key) {
