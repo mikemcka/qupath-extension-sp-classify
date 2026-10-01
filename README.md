@@ -66,7 +66,7 @@ The extension JAR bundles XGBoost4J, LightGBM4J, and a pure-Java Random Forest �
 
 1. **Open a project** with an image that has cell detections (run *Analyze > Cell detection* first if needed)
 2. **Label seed cells** — create point annotations on detected cells, then set the annotation's class (e.g. `CD4T`, `Bcell`, `Macrophage`). Aim for ≥20-30 cells per class.
-3. **Import a marker table** (optional) — *Extensions > SP Classify > Import Marker Table* — a CSV mapping cell types to up to 3 marker channel names, used for auto-channel switching during review
+3. **Set up a channel mapping** (optional) — *Extensions > SP Classify > Channel Mapping (Review Display)...* — pick which image channels review should show for each cell type (saved per project; no limit on channels per class). Alternatively import a CSV via *Import Marker Table*, which is also the way to share a mapping between projects
 4. **Select features** (optional) — *Extensions > SP Classify > Select Features* — choose which measurements to include in training. Features are shown in a grouped, searchable checkbox tree (one group per marker, plus Morphology / Shape, Neighbors, Embeddings, and Other / Uncategorized) so 1000+-column panels stay navigable.
 5. **Clustering normalisation** (optional, clustering-only) — *Extensions > SP Classify > Clustering Normalisation* — apply arcsinh or sqrt transforms to selected features for the clustering / scatter-plot / gating workflows (the classifier always trains and predicts on raw values). Match the cofactor to your intensity scale: ~25–50 for raw fluorescence panels (COMET, CODEX; scale-dependent) or 0.05 for MIBI mass spectrometry (Hartmann et al. 2021; see [References](#references)).
 6. **Train** — click *Train* in the SP Classify panel (or *Extensions > SP Classify > Run Classification…*). If features haven't been selected yet, you'll be prompted to select them or use all. A confirmation dialog shows the feature and label counts, **Model 1** and **Model 2** type selectors (default: XGBoost + LightGBM), resampling, auto-tune, and early stopping options. If the project has multiple images, a dual-list image selector lets you choose which images to apply the trained classifier to. A progress dialog shows real-time training status.
@@ -78,7 +78,13 @@ The extension JAR bundles XGBoost4J, LightGBM4J, and a pure-Java Random Forest �
 
 ### Marker Table Format For Automated Channel Switching
 
-A simple CSV with up to 5 marker columns. Trailing columns may be left blank. A ready-to-edit
+The recommended way to build the mapping is the **Channel Mapping editor** (*Extensions > SP Classify >
+Channel Mapping (Review Display)...*, or **Edit channel mapping…** in the Review Mode window): pick a
+cell type, tick the image channels review should show. The mapping is saved per project to
+`<project>/celltune/marker-table.json`. A CSV remains the import / export / sharing route.
+
+The simple CSV format has `Marker1`–`Marker5` columns plus any further `Marker…` columns (no upper
+limit). Trailing columns may be left blank. A ready-to-edit
 example is provided at [`examples/marker-table-example.csv`](examples/marker-table-example.csv).
 
 ```csv
@@ -94,6 +100,9 @@ tolerant of case, spacing, and punctuation (so `CD4 T`, `cd4t`, and `CD4-T` are 
 same type), and `Marker` names are matched to image channels the same way — a channel named
 `CD3 (Opal 570)` still matches the marker `CD3`. If a predicted type isn't found in the table, or
 none of its markers match any channel, the viewer's channels are left unchanged.
+
+If a CSV picks the wrong channels, open the editor, **Import CSV…**, look for `~` / `!` / `✗` rows, fix
+the ticks, **Pin all matches**, then **Save**. See [Marker table format](docs/marker-table.md) for details.
 
 ## Building from Source
 

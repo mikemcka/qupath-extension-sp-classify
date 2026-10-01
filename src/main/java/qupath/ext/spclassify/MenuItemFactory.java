@@ -99,6 +99,10 @@ final class MenuItemFactory {
                         item("Binary Classifiers...", enabled, () -> ext.showBinaryClassifiers(qupath)),
                         item("Composite Classification...", enabled, () -> ext.showCompositeClassification(qupath)),
                         item("Class Control...", enabled, () -> ext.showClassControl(qupath)),
+                        item(
+                                resources.getString("menu.channel.mapping"),
+                                enabled,
+                                () -> ext.showChannelMapping(qupath)),
                         item(resources.getString("menu.features"), enabled, () -> ext.showFeatureSelection(qupath)),
                         item("Clustering Normalisation", enabled, () -> ext.showClusteringNormalisation(qupath)),
                         new SeparatorMenuItem(),

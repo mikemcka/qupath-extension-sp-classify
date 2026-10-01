@@ -2,6 +2,8 @@ package qupath.ext.spclassify.io;
 
 import static org.junit.jupiter.api.Assertions.*;
 
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
 import java.awt.image.BufferedImage;
 import java.io.IOException;
 import java.lang.reflect.Proxy;
@@ -83,6 +85,82 @@ class ProjectStateManagerMarkerTableTest {
 
         ProjectStateManager.saveMarkerTable(project, new CellTypeTable());
         assertNull(ProjectStateManager.loadMarkerTable(project));
+    }
+
+    @Test
+    void exactChannelsRoundTripUncappedAndSimpleMarkersStayReadable() throws Exception {
+        Project<BufferedImage> project = fakeProject(tempDir.resolve("v2-simple/project.qpproj"));
+        List<String> many = List.of("CD3", "CD4", "CD8", "CD45", "CD45RA", "CD103", "PD-1 (Opal 690)");
+        CellTypeTable original = new CellTypeTable();
+        original.putChannels("T", many);
+        original.put("Legacy", List.of("CD20"));
+
+        ProjectStateManager.saveMarkerTable(project, original);
+        CellTypeTable loaded = ProjectStateManager.loadMarkerTable(project);
+
+        assertEquals(many, loaded.getChannels("T"));
+        assertEquals(many, loaded.getMarkers("T"));
+        assertFalse(loaded.hasChannels("Legacy"));
+        assertEquals(List.of("CD20"), loaded.getMarkers("Legacy"));
+
+        // An older build only reads "markers": it must still find them alongside "channels".
+        JsonObject root = readJson(project);
+        assertEquals(2, root.get("version").getAsInt());
+        JsonObject t = root.getAsJsonArray("entries").get(0).getAsJsonObject();
+        assertEquals(7, t.getAsJsonArray("markers").size());
+        assertEquals(7, t.getAsJsonArray("channels").size());
+        assertFalse(root.getAsJsonArray("entries").get(1).getAsJsonObject().has("channels"));
+    }
+
+    @Test
+    void ruleTableWithExactChannelsRoundTrips() throws Exception {
+        Project<BufferedImage> project = fakeProject(tempDir.resolve("v2-rule/project.qpproj"));
+        CellTypeTable original = new CellTypeTable();
+        original.putRule("CD8T", "CD8&CD3", "CD45", null);
+        original.putChannels("CD8T", List.of("CD8", "CD3", "CD31"));
+        original.putRule("Plasma", "CD38&!IgA", null, "VIM");
+
+        ProjectStateManager.saveMarkerTable(project, original);
+        CellTypeTable loaded = ProjectStateManager.loadMarkerTable(project);
+
+        assertTrue(loaded.hasGatingRules());
+        assertEquals("CD8&CD3", loaded.getPrimaryExpression("CD8T"));
+        assertEquals("CD45", loaded.getSecondaryMarkers("CD8T"));
+        assertEquals(List.of("CD8", "CD3", "CD31"), loaded.getChannels("CD8T"));
+        assertEquals("VIM", loaded.getTertiaryMarkers("Plasma"));
+        assertFalse(loaded.hasChannels("Plasma"));
+    }
+
+    @Test
+    void versionOneFileStillLoads() throws Exception {
+        Project<BufferedImage> project = fakeProject(tempDir.resolve("v1/project.qpproj"));
+        Path dir = ProjectStateManager.getCellTuneDir(project);
+        Files.writeString(dir.resolve("marker-table.json"), """
+                {"version": 1, "hasRules": false, "entries": [
+                  {"cellType": "T-Cell", "markers": ["CD3", "CD4"]},
+                  {"cellType": "Macrophage", "markers": ["CD68"]}
+                ]}
+                """);
+        CellTypeTable loaded = ProjectStateManager.loadMarkerTable(project);
+        assertNotNull(loaded);
+        assertEquals(List.of("CD3", "CD4"), loaded.getMarkers("T-Cell"));
+        assertFalse(loaded.hasAnyChannels());
+    }
+
+    @Test
+    void newerSchemaVersionStillLoadsKnownFields() throws Exception {
+        Project<BufferedImage> project = fakeProject(tempDir.resolve("v9/project.qpproj"));
+        Path dir = ProjectStateManager.getCellTuneDir(project);
+        Files.writeString(
+                dir.resolve("marker-table.json"),
+                "{\"version\": 9, \"entries\": [{\"cellType\": \"T\", \"markers\": [\"CD3\"], \"future\": 1}]}");
+        assertEquals(
+                List.of("CD3"), ProjectStateManager.loadMarkerTable(project).getMarkers("T"));
+    }
+
+    private static JsonObject readJson(Project<?> project) throws IOException {
+        Path file = ProjectStateManager.getCellTuneDir(project).resolve("marker-table.json");
+        return JsonParser.parseString(Files.readString(file)).getAsJsonObject();
     }
 
     @SuppressWarnings("unchecked")

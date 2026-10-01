@@ -112,6 +112,8 @@ public class ClassificationPanel extends VBox {
     private Runnable onApplyToImages;
     private final Button manualLabelButton = new Button("Manual Label Mode");
     private Runnable onManualLabelMode;
+    /** Opens the channel-mapping editor owned by the given window; the Runnable runs after a save. */
+    private java.util.function.BiConsumer<javafx.stage.Window, Runnable> onEditChannelMapping;
     /** Sanitized name of the active binary classifier, or null in multi-class mode.
      *  Used to scope per-image label files so binary classifiers don't share labels. */
     private String activeBinaryMarker = null;
@@ -458,6 +460,10 @@ public class ClassificationPanel extends VBox {
 
     public void setOnManualLabelMode(Runnable cb) {
         this.onManualLabelMode = cb;
+    }
+
+    public void setOnEditChannelMapping(java.util.function.BiConsumer<javafx.stage.Window, Runnable> cb) {
+        this.onEditChannelMapping = cb;
     }
 
     public void setOnFeatureImportance(Runnable cb) {
@@ -1573,12 +1579,21 @@ public class ClassificationPanel extends VBox {
             return;
         }
 
-        var channelSelector = new ChannelSelector(qupath, cellTypeTable);
+        // Supplier, not a snapshot: a mapping saved from the editor mid-review reaches this
+        // selector through syncPanelState → setCellTypeTable.
+        var channelSelector = new ChannelSelector(qupath, () -> cellTypeTable);
         var toolbar = new ReviewToolbar(reviewController, cellTypeTable, channelSelector);
 
         var vbox = new javafx.scene.layout.VBox(6);
         vbox.setPadding(new javafx.geometry.Insets(6));
-        vbox.getChildren().addAll(toolbar, channelSelector.getCheckBox(), channelSelector.getDisplayRangeCheckBox());
+        vbox.getChildren()
+                .addAll(
+                        toolbar,
+                        channelSelector.buildControls(
+                                onEditChannelMapping == null
+                                        ? null
+                                        : owner -> onEditChannelMapping.accept(
+                                                owner, () -> channelSelector.applyForCurrentCell(reviewController))));
 
         var stage = new javafx.stage.Stage();
         stage.setTitle(STRINGS.getString("review.stage.title"));

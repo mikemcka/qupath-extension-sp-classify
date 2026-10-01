@@ -6,7 +6,7 @@ Everything the extension writes is under `<project>/celltune/`:
 celltune/
 ├── classifier-state.json         # Multi-class model (features, classes, model bytes, labels, normalisation)
 ├── composite-rules.json          # Saved CompositeClassificationRule objects (advanced/programmatic)
-├── marker-table.json             # Imported marker table (auto channel switching) — persists across restarts
+├── marker-table.json             # Channel mapping for review (markers + exact channels, schema v2) — per project, persists across restarts
 ├── binary-registry.json          # markerName → state file path
 ├── labels_backup_YYYYMMDD_HHMMSS.json   # Auto-snapshot before each Train
 │

@@ -97,13 +97,15 @@ Type a class name, click **Add Class**. Just adds it to QuPath's class panel —
 - Pick a class that was previously the merge target (the combo scans label files for `-mergedInto(...)` patterns).
 - **Undo Merge for Selected Class** — restores every label to its original name and re-adds the source `PathClass` to QuPath's class panel. The target class is **not** deleted; you can drop it from the Delete tab if you no longer want it.
 
-### 4.4 Import a marker table (auto channel switching)
+### 4.4 Channel mapping for review (marker table)
 
-**Menu:** *Extensions → SP Classify → Import ▸ Marker Table...*
+**Menu:** *Extensions → SP Classify → Channel Mapping (Review Display)...* (or **Edit channel mapping…** in the Review Mode window)
 
-Optional. Maps cell types to marker channels so review mode can auto-switch channel visibility to the markers relevant to each predicted cell.
+Optional. Maps each cell type to the image channels that review mode should show, so it can auto-switch channel visibility to the channels relevant to each predicted cell. The **Channel Mapping editor** is the recommended way to build this; a CSV remains the import / export / sharing route (and the legacy one).
 
-**Simple format:**
+The editor needs an **open image** — its channels are the choices. Pick a class on the left, tick channels on the right, and **Save**. Each class shows a status glyph against the open image (✓ exact, ≈ matched ignoring case/spacing/punctuation, ~ partial-name match only, ! some names unmatched, ✗ nothing matches, – no channels set). There is no limit on channels per class; above 8 the editor warns that the composite may be hard to read, but never blocks. Full walkthrough of the editor, its buttons (Clear / Pin matches / Preview / Import CSV… / Export CSV… / Pin all matches / Scan project channels) and the CSV formats: **[Marker table format](marker-table.md)**.
+
+**Simple CSV format** (via *Import ▸ Marker Table...* or the editor's **Import CSV…**):
 
 ```csv
 CellType,Marker1,Marker2,Marker3
@@ -114,10 +116,12 @@ Dendritic,CD11c,,
 NK-Cell,CD56,,
 ```
 
-Channel-name matching is robust (alphanumeric-normalised), so `CD3_S2 - Cy5_AF` matches the channel `CD3_S2-Cy5_AF` automatically.
+Columns `Marker1`–`Marker5` are read as before, plus any further columns whose header starts with `Marker` (`Marker6`, …); other extra columns are ignored. Channel-name matching is robust (case-, spacing- and punctuation-insensitive) and uses the image's own channel names, so `CD3_S2 - Cy5_AF` matches the channel `CD3_S2-Cy5_AF` automatically. Channels you pick in the editor are matched verbatim first, then by the same tolerant matching on other images.
 
-In review mode, ticking the **Auto-select channels during review** checkbox makes QuPath show only the relevant markers for the cell currently under review. Untick it to navigate channels manually. A second, smaller tick-box — **Auto-adjust brightness/contrast of shown channels** — is **off by default**: tick it if you also want each shown channel's display range (brightness/contrast) re-adjusted automatically each time you move to a new cell. Left unticked, only channel *visibility* switches and your own brightness/contrast settings are preserved. (It only takes effect while auto-select is on, so it is greyed out otherwise.)
+**Fixing a CSV that picks the wrong channels:** open the editor, **Import CSV…**, look for `~` / `!` / `✗` rows, fix the ticks, **Pin all matches**, **Save**.
 
-> The marker table is saved to `<project>/celltune/marker-table.json` when you import it, so it persists across QuPath restarts — no need to re-import. Importing a new CSV overwrites it.
+In review mode, ticking the **Auto-select channels during review** checkbox makes QuPath show only the mapped channels for the cell currently under review. Untick it to navigate channels manually. A second, smaller tick-box — **Auto-adjust brightness/contrast of shown channels** — is **off by default**: tick it if you also want each shown channel's display range (brightness/contrast) re-adjusted automatically each time you move to a new cell. Left unticked, only channel *visibility* switches and your own brightness/contrast settings are preserved. (It only takes effect while auto-select is on, so it is greyed out otherwise.) Both tick-boxes remember their state across review windows and QuPath restarts. A status line under them shows what the current cell is displaying.
+
+> The mapping is **per project**, saved to `<project>/celltune/marker-table.json` when you press **Save** in the editor (or import a CSV via *Import ▸ Marker Table...*), so it persists across QuPath restarts. Each project keeps its own mapping; switching projects loads that project's mapping (a project without one starts empty). To reuse a mapping in another project, **Export CSV…** and import it there. The editor's **Import CSV…** replaces what it shows and is not saved until you press **Save**.
 
 ---

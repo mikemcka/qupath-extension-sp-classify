@@ -5,7 +5,7 @@ Build one classifier that distinguishes any number of cell types (e.g. T-cell / 
 ```
 Select Features  →  Clustering Normalisation  →  Create classes (Class Control)
        ↓
-Import Marker Table (optional, for auto channel switching)
+Channel Mapping (optional, for auto channel switching)
        ↓
 Manual Label Mode  → label ~20–50 cells across the open image
        ↓

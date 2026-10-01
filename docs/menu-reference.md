@@ -7,6 +7,7 @@ All under *Extensions → SP Classify*.
 | Binary Classifiers... | Project | Open the binary classifier manager (create/open/delete per-marker classifiers). |
 | Composite Classification... | Project + ≥1 trained binary | Apply trained binary classifiers and assign composite labels. |
 | Class Control... | Project | Add/Delete/Merge/Undo Merge classes. |
+| Channel Mapping (Review Display)... | Open image | Edit which image channels review shows for each class (per-project, with CSV import/export). See [Marker table format](marker-table.md). |
 | Select Features... | Project | Pick which measurement columns are used for training. |
 | Clustering Normalisation | Project | Per-feature arcsinh/sqrt with shared cofactor (clustering-only; classifier uses raw). |
 | Batch Normalisation... | Project | UniFORM per-image marker-intensity alignment across a cohort; fit + QC, streamed into clustering + ML or written as `(batchnorm)` columns. See §[19](batch-normalisation.md). |
@@ -18,7 +19,7 @@ All under *Extensions → SP Classify*.
 | Export ▸ Cell Table... | Open image with detections | One CSV per selected image. |
 | Export ▸ Ground Truth... | Open image with labels (multi-class) | Portable labels + feature vectors CSV. |
 | Export ▸ Active Binary Ground Truth... | Binary mode active + open image with labels | Same as above, scoped to active marker. |
-| Import ▸ Marker Table... | Open image | Load cell-type → markers mapping for review channel switching. |
+| Import ▸ Marker Table... | Open image | Load a cell-type → markers CSV for review channel switching (the [Channel Mapping editor](marker-table.md) is the recommended way to edit it). |
 | Import ▸ Ground Truth... | Open image (multi-class) | Spatial-match or training-data-only mode. |
 | Import ▸ Active Binary Ground Truth... | Binary mode active + open image | Same as above, scoped to active marker. |
 | Utility Scripts ▸ Filter Cells by Size & Circularity... | Open image with cells | Remove cells outside optional area/circularity bounds (current image). See §[13.1](utility-scripts.md#131-filter-cells-by-size--circularity). |
