@@ -73,6 +73,38 @@ class TrainValMetricsComputerTest {
     }
 
     @Test
+    void realCountIsTheTrainFoldBeforeResampling() throws Exception {
+        // 20 of class 0, 6 of class 1 → real train fold 16 + 4 = 20, val 4 + 2 = 6.
+        List<Integer> labels = new ArrayList<>();
+        for (int i = 0; i < 20; i++) labels.add(0);
+        for (int i = 0; i < 6; i++) labels.add(1);
+        List<float[]> rows = rowsEncoding(labels);
+        TrainValMetricsComputer.ModelTrainer trainer = (data, lbls, n) -> {};
+
+        var result = TrainValMetricsComputer.compute(
+                rows,
+                labels,
+                labels.size(),
+                2,
+                2,
+                ResamplingStrategy.SMOTE,
+                trainer,
+                perfectPredictor(2),
+                "M1",
+                trainer,
+                perfectPredictor(2),
+                "M2",
+                CLASSES,
+                s -> {});
+
+        assertEquals(20, result.model1Train().realCount());
+        assertEquals(20, result.model2Train().realCount());
+        assertTrue(result.model1Train().total() > 20, "SMOTE should add rows to the scored train fold");
+        assertEquals(6, result.model1Val().realCount());
+        assertEquals(6, result.model1Val().total(), "validation fold is never resampled");
+    }
+
+    @Test
     void degenerateSplitReturnsEmptyResultAndLogs() throws Exception {
         // One sample per class → the 20% val fold is empty.
         List<Integer> labels = new ArrayList<>(List.of(0, 1));

@@ -25,6 +25,9 @@ import java.util.List;
  *                       count of samples whose true class index is
  *                       {@code trueIdx} and whose predicted class index is
  *                       {@code predIdx}. Rows sum to {@code support[i]}.
+ * @param realCount     number of real labelled cells in the fold before resampling. Equals
+ *                       {@code total} for a fold that was not resampled. 0 means unknown
+ *                       (metrics saved by a version before this field existed).
  */
 public record TrainingMetrics(
         String label,
@@ -37,7 +40,8 @@ public record TrainingMetrics(
         double macroF1,
         double weightedF1,
         int total,
-        int[][] confusionMatrix) {
+        int[][] confusionMatrix,
+        int realCount) {
 
     /**
      * Compute per-class metrics from raw probabilities.
@@ -49,6 +53,17 @@ public record TrainingMetrics(
      */
     public static TrainingMetrics compute(
             String label, List<String> classNames, float[] trueLabels, float[][] predProba) {
+        return compute(label, classNames, trueLabels, predProba, predProba.length);
+    }
+
+    /**
+     * As {@link #compute(String, List, float[], float[][])}, for a fold whose scored rows differ
+     * from its real labelled cells (a resampled train fold).
+     *
+     * @param realCount real labelled cells in the fold before resampling
+     */
+    public static TrainingMetrics compute(
+            String label, List<String> classNames, float[] trueLabels, float[][] predProba, int realCount) {
         int n = predProba.length;
         int nClasses = classNames.size();
         int[][] cm = new int[nClasses][nClasses];
@@ -98,7 +113,18 @@ public record TrainingMetrics(
         double weightedF1 = n > 0 ? weightedF1Sum / n : 0;
 
         return new TrainingMetrics(
-                label, List.copyOf(classNames), precision, recall, f1, support, accuracy, macroF1, weightedF1, n, cm);
+                label,
+                List.copyOf(classNames),
+                precision,
+                recall,
+                f1,
+                support,
+                accuracy,
+                macroF1,
+                weightedF1,
+                n,
+                cm,
+                realCount);
     }
 
     /**

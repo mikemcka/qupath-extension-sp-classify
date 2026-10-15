@@ -208,4 +208,35 @@ class TrainingMetricsTest {
         assertTrue(report.contains("accuracy"));
         assertTrue(report.contains("macro F1"));
     }
+
+    // ── real (pre-resampling) count ──────────────────────────────────────────
+
+    @Test
+    void realCountDefaultsToScoredRows() {
+        var metrics = TrainingMetrics.compute(
+                "t", List.of("A", "B"), new float[] {0f, 1f, 1f}, new float[][] {{1f, 0f}, {0f, 1f}, {0f, 1f}});
+        assertEquals(3, metrics.realCount());
+    }
+
+    @Test
+    void realCountCanDifferFromScoredRows() {
+        var metrics = TrainingMetrics.compute(
+                "t", List.of("A", "B"), new float[] {0f, 1f, 1f}, new float[][] {{1f, 0f}, {0f, 1f}, {0f, 1f}}, 2);
+        assertEquals(2, metrics.realCount());
+        assertEquals(3, metrics.total());
+    }
+
+    @Test
+    void metricsSavedWithoutRealCountLoadAsZero() {
+        var metrics = TrainingMetrics.compute(
+                "t", List.of("A", "B"), new float[] {0f, 1f}, new float[][] {{1f, 0f}, {0f, 1f}});
+        var gson = new com.google.gson.Gson();
+        var json = gson.toJsonTree(metrics).getAsJsonObject();
+        json.remove("realCount");
+
+        var loaded = gson.fromJson(json, TrainingMetrics.class);
+
+        assertEquals(0, loaded.realCount(), "older saved state has no realCount; 0 means unknown");
+        assertEquals(2, loaded.total());
+    }
 }
