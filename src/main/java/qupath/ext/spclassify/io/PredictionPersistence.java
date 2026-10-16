@@ -15,8 +15,10 @@ import qupath.lib.projects.Project;
 /**
  * Per-image {@code Pred_ALL} prediction persistence.
  * <p>
- * Predictions are stored as {@code <project>/celltune/image-predictions/<image>.json}.
- * Each file records the class-name ordering plus one entry per cell
+ * Multi-class predictions are stored as {@code <project>/celltune/image-predictions/<image>.json};
+ * a binary classifier's are stored as
+ * {@code <project>/celltune/binary-image-predictions/<scope>/<image>.json}, so binary and
+ * multi-class predictions never overwrite each other. Each file records the class-name ordering plus one entry per cell
  * (both model labels and their probability vectors).
  * <p>
  * Extracted verbatim from {@link ProjectStateManager}; the public API there delegates
@@ -28,8 +30,18 @@ final class PredictionPersistence {
 
     private static final Logger logger = LoggerFactory.getLogger(PredictionPersistence.class);
     private static final String IMAGE_PREDICTIONS_DIR = "image-predictions";
+    private static final String BINARY_IMAGE_PREDICTIONS_DIR = "binary-image-predictions";
 
     private PredictionPersistence() {} // utility class
+
+    /** {@code scope} null/blank = multi-class; otherwise a binary marker name, as for labels. */
+    private static Path resolvePredictionsDir(Project<?> project, String scope) throws IOException {
+        Path ctDir = ProjectStateManager.getCellTuneDir(project);
+        if (scope == null || scope.isBlank()) {
+            return ctDir.resolve(IMAGE_PREDICTIONS_DIR);
+        }
+        return ctDir.resolve(BINARY_IMAGE_PREDICTIONS_DIR).resolve(ProjectStateManager.sanitiseFileName(scope));
+    }
 
     /** Internal JSON shape for persisted per-image predictions. */
     private static class SavedPredictions {
@@ -49,12 +61,13 @@ final class PredictionPersistence {
     /**
      * Save Pred_ALL predictions for a specific image.
      */
-    static Path saveImagePredictions(Project<?> project, String imageName, PopulationSet predAll) throws IOException {
+    static Path saveImagePredictions(Project<?> project, String scope, String imageName, PopulationSet predAll)
+            throws IOException {
         if (predAll == null || predAll.size() == 0) {
             return null;
         }
 
-        Path dir = ProjectStateManager.getCellTuneDir(project).resolve(IMAGE_PREDICTIONS_DIR);
+        Path dir = resolvePredictionsDir(project, scope);
         Files.createDirectories(dir);
 
         String safeFileName = ProjectStateManager.sanitiseFileName(imageName) + ".json";
@@ -91,8 +104,8 @@ final class PredictionPersistence {
     /**
      * Load Pred_ALL predictions previously saved for a specific image.
      */
-    static PopulationSet loadImagePredictions(Project<?> project, String imageName) throws IOException {
-        Path dir = ProjectStateManager.getCellTuneDir(project).resolve(IMAGE_PREDICTIONS_DIR);
+    static PopulationSet loadImagePredictions(Project<?> project, String scope, String imageName) throws IOException {
+        Path dir = resolvePredictionsDir(project, scope);
         String safeFileName = ProjectStateManager.sanitiseFileName(imageName) + ".json";
         Path filePath = dir.resolve(safeFileName);
 
@@ -143,8 +156,8 @@ final class PredictionPersistence {
     /**
      * List the names of all images in the project that have saved prediction files.
      */
-    static List<String> listImagesWithPredictions(Project<?> project) throws IOException {
-        Path dir = ProjectStateManager.getCellTuneDir(project).resolve(IMAGE_PREDICTIONS_DIR);
+    static List<String> listImagesWithPredictions(Project<?> project, String scope) throws IOException {
+        Path dir = resolvePredictionsDir(project, scope);
         if (!Files.exists(dir)) return List.of();
         List<String> result = new ArrayList<>();
         for (var entry : project.getImageList()) {

@@ -886,6 +886,9 @@ public class ClassificationPanel extends VBox {
                 (binaryActive && activeBinaryClassNames != null && !activeBinaryClassNames.isEmpty())
                         ? new java.util.LinkedHashSet<>(activeBinaryClassNames)
                         : null;
+        // Labels pooled from other images get the same class filter as this image's labels,
+        // so a deleted class (or a foreign class in binary mode) does not come back through them.
+        final java.util.Set<String> pooledClassFilter = validClasses.isEmpty() ? null : Set.copyOf(validClasses);
         // In binary mode every label belongs to one classifier — always pool labels
         // for that classifier, regardless of the (now-disabled) checkbox state.
         final boolean poolAllImages = binaryActive || poolImagesCheckBox.isSelected();
@@ -945,7 +948,14 @@ public class ClassificationPanel extends VBox {
                         List<String> pooledLabels = null;
                         if (poolAllImages && projectRef != null) {
                             var pooled = TrainingOrchestrator.poolLabelsFromOtherImages(
-                                    projectRef, imageData, scope, finalFeatureNames, null, trainBatchShifts, trainLog);
+                                    projectRef,
+                                    imageData,
+                                    scope,
+                                    pooledClassFilter,
+                                    finalFeatureNames,
+                                    null,
+                                    trainBatchShifts,
+                                    trainLog);
                             pooledRows = pooled.rows();
                             pooledLabels = pooled.labels();
                         }
@@ -1145,6 +1155,7 @@ public class ClassificationPanel extends VBox {
                                     classifier.getFeatureNames(),
                                     null, // raw inference — classifier is raw-only (batch gain applied separately)
                                     trainBatchShifts,
+                                    scope,
                                     this,
                                     trainLog);
                         }
@@ -1297,7 +1308,8 @@ public class ClassificationPanel extends VBox {
             var entry = project.getEntry(imageData);
             if (entry != null) imgName = entry.getImageName();
         }
-        var view = new ConfusionMatrixView(qupath.getStage(), predAll, classNames, labelStore, qupath, imgName);
+        var view = new ConfusionMatrixView(
+                qupath.getStage(), predAll, classNames, labelStore, qupath, imgName, activeBinaryMarker);
         if (classifier != null) view.setModelTypes(classifier.getModel1Type(), classifier.getModel2Type());
         lastAgreementRates = view.getAgreementRates();
         if (onAgreementRatesChanged != null) onAgreementRatesChanged.accept(lastAgreementRates);
@@ -1766,6 +1778,10 @@ public class ClassificationPanel extends VBox {
      *     Platform.runLater inside the callback if updating UI.
      */
     private SamplingContext buildSamplingContext(java.util.function.BiConsumer<Integer, Integer> progressCallback) {
+        final String scope = activeBinaryMarker;
+        // Saved predictions made with a different class list are stale (older model, or binary
+        // predictions earlier versions wrote to the multi-class file) and are left out.
+        final List<String> modelClasses = classifier != null ? classifier.getClassNames() : null;
         PopulationSet pooled = new PopulationSet("Pred_ALL");
         Map<String, String> cellToImage = new LinkedHashMap<>();
         // Per-cell annotation names captured at sample time, while we still
@@ -1808,8 +1824,10 @@ public class ClassificationPanel extends VBox {
                     cellToAnnotations);
         } else if (project != null && currentImageNameFinal != null) {
             try {
-                var loadedCurrent = ProjectStateManager.loadImagePredictions(project, currentImageNameFinal);
-                if (loadedCurrent != null && loadedCurrent.size() > 0) {
+                var loadedCurrent = ProjectStateManager.loadImagePredictions(project, scope, currentImageNameFinal);
+                if (loadedCurrent != null
+                        && loadedCurrent.size() > 0
+                        && ProjectStateManager.predictionsMatchClasses(loadedCurrent, modelClasses)) {
                     addPredictionsToSamplingPool(
                             pooled,
                             loadedCurrent,
@@ -1848,7 +1866,8 @@ public class ClassificationPanel extends VBox {
                     .map(name -> {
                         PopulationSet ps = null;
                         try {
-                            ps = ProjectStateManager.loadImagePredictions(project, name);
+                            ps = ProjectStateManager.loadImagePredictions(project, scope, name);
+                            if (!ProjectStateManager.predictionsMatchClasses(ps, modelClasses)) ps = null;
                         } catch (Exception ignored) {
                         }
                         int c = done.incrementAndGet();

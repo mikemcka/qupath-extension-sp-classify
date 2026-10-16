@@ -36,9 +36,16 @@ final class ReviewSampling {
      *
      * @param currentPredAll   the open image's in-memory predictions (may be null)
      * @param currentImageOnly restrict pooling to the current image
+     * @param scope            the active binary marker, or null for multi-class
+     * @param classNames       the loaded classifier's classes; saved predictions made with a
+     *                         different class list are skipped (null = no check)
      */
     static SamplingContext buildSamplingContext(
-            QuPathGUI qupath, PopulationSet currentPredAll, boolean currentImageOnly) {
+            QuPathGUI qupath,
+            PopulationSet currentPredAll,
+            boolean currentImageOnly,
+            String scope,
+            List<String> classNames) {
         PopulationSet pooled = new PopulationSet("Pred_ALL");
         Map<String, String> cellToImage = new LinkedHashMap<>();
 
@@ -56,8 +63,10 @@ final class ReviewSampling {
             addPredictionsToSamplingPool(pooled, currentPredAll, currentImageName, cellToImage);
         } else if (project != null && currentImageName != null) {
             try {
-                var loadedCurrent = ProjectStateManager.loadImagePredictions(project, currentImageName);
-                if (loadedCurrent != null && loadedCurrent.size() > 0) {
+                var loadedCurrent = ProjectStateManager.loadImagePredictions(project, scope, currentImageName);
+                if (loadedCurrent != null
+                        && loadedCurrent.size() > 0
+                        && ProjectStateManager.predictionsMatchClasses(loadedCurrent, classNames)) {
                     addPredictionsToSamplingPool(pooled, loadedCurrent, currentImageName, cellToImage);
                 }
             } catch (Exception ignored) {
@@ -72,8 +81,10 @@ final class ReviewSampling {
                 if (currentImageName != null && currentImageName.equals(entry.getImageName())) continue;
 
                 try {
-                    var loaded = ProjectStateManager.loadImagePredictions(project, entry.getImageName());
-                    if (loaded != null && loaded.size() > 0) {
+                    var loaded = ProjectStateManager.loadImagePredictions(project, scope, entry.getImageName());
+                    if (loaded != null
+                            && loaded.size() > 0
+                            && ProjectStateManager.predictionsMatchClasses(loaded, classNames)) {
                         addPredictionsToSamplingPool(pooled, loaded, entry.getImageName(), cellToImage);
                     }
                 } catch (Exception ignored) {

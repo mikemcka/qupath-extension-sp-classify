@@ -67,6 +67,9 @@ public class ConfusionMatrixView {
     // ── Image-selector state (set when project context is available) ─────────
     private final QuPathGUI qupath;
     private final String currentImageName;
+    /** Binary marker whose saved predictions the image selector reads; null = multi-class. */
+    private final String predictionScope;
+
     private final Map<String, PopulationSet> predCache;
     private PopulationSet currentDisplayPredAll;
 
@@ -106,7 +109,7 @@ public class ConfusionMatrixView {
      * Build and display the confusion matrix in inter-model mode (no ground-truth toggle).
      */
     public ConfusionMatrixView(Stage owner, PopulationSet predALL, List<String> classNames) {
-        this(owner, predALL, classNames, null, null, null);
+        this(owner, predALL, classNames, null, null, null, null);
     }
 
     /**
@@ -118,7 +121,7 @@ public class ConfusionMatrixView {
      * @param labelStore optional ground-truth label store
      */
     public ConfusionMatrixView(Stage owner, PopulationSet predALL, List<String> classNames, LabelStore labelStore) {
-        this(owner, predALL, classNames, labelStore, null, null);
+        this(owner, predALL, classNames, labelStore, null, null, null);
     }
 
     /**
@@ -133,6 +136,7 @@ public class ConfusionMatrixView {
      * @param labelStore       optional ground-truth label store
      * @param qupath           QuPath GUI (for loading other images' predictions)
      * @param currentImageName image name key for the supplied predALL
+     * @param predictionScope  binary marker whose saved predictions to list, or null for multi-class
      */
     public ConfusionMatrixView(
             Stage owner,
@@ -140,7 +144,9 @@ public class ConfusionMatrixView {
             List<String> classNames,
             LabelStore labelStore,
             QuPathGUI qupath,
-            String currentImageName) {
+            String currentImageName,
+            String predictionScope) {
+        this.predictionScope = predictionScope;
         this.classNames = List.copyOf(classNames);
         this.predALL = predALL;
         this.labelStore = labelStore;
@@ -600,7 +606,8 @@ public class ConfusionMatrixView {
             new Thread(
                             () -> {
                                 try {
-                                    List<String> names = ProjectStateManager.listImagesWithPredictions(project);
+                                    List<String> names =
+                                            ProjectStateManager.listImagesWithPredictions(project, predictionScope);
                                     Platform.runLater(() -> {
                                         for (String name : names) {
                                             if (!combo.getItems().contains(name))
@@ -639,10 +646,12 @@ public class ConfusionMatrixView {
             new Thread(
                             () -> {
                                 try {
-                                    List<String> names = ProjectStateManager.listImagesWithPredictions(project);
+                                    List<String> names =
+                                            ProjectStateManager.listImagesWithPredictions(project, predictionScope);
                                     for (String name : names) {
                                         if (!predCache.containsKey(name)) {
-                                            PopulationSet ps = ProjectStateManager.loadImagePredictions(project, name);
+                                            PopulationSet ps = ProjectStateManager.loadImagePredictions(
+                                                    project, predictionScope, name);
                                             if (ps != null) predCache.put(name, ps);
                                         }
                                     }
@@ -669,7 +678,8 @@ public class ConfusionMatrixView {
                 new Thread(
                                 () -> {
                                     try {
-                                        PopulationSet ps = ProjectStateManager.loadImagePredictions(project, selected);
+                                        PopulationSet ps = ProjectStateManager.loadImagePredictions(
+                                                project, predictionScope, selected);
                                         if (ps != null) {
                                             predCache.put(selected, ps);
                                             Platform.runLater(() -> {

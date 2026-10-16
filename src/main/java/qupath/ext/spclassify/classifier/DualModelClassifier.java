@@ -625,6 +625,8 @@ public class DualModelClassifier {
             } catch (Exception ex) {
                 logger.warn("Failed to compute training/validation metrics", ex);
                 out.accept("Note: train/val metrics computation failed: " + ex.getMessage());
+                // Drop the previous run's metrics so they are not shown or saved with this model.
+                setTrainingMetrics(null, null, null, null);
             }
         } else {
             this.model1TrainMetrics = null;
