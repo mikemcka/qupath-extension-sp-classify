@@ -14,8 +14,10 @@ import javafx.beans.property.SimpleStringProperty;
 import javafx.beans.property.StringProperty;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import qupath.ext.spclassify.BatchCorrection;
 import qupath.ext.spclassify.io.BinaryClassifierRegistry;
 import qupath.ext.spclassify.io.ProjectStateManager;
+import qupath.ext.spclassify.model.BatchShifts;
 import qupath.ext.spclassify.model.CellFeatureExtractor;
 import qupath.lib.images.ImageData;
 import qupath.lib.objects.PathObject;
@@ -32,6 +34,8 @@ public class CompositeClassifier {
 
     private final DoubleProperty progress = new SimpleDoubleProperty(0.0);
     private final StringProperty status = new SimpleStringProperty("");
+    // Markers whose batch-correction mismatch has been logged, so it is reported once per marker.
+    private final java.util.Set<String> mismatchReported = new java.util.HashSet<>();
 
     public DoubleProperty progressProperty() {
         return progress;
@@ -114,10 +118,13 @@ public class CompositeClassifier {
 
         List<String> activeMarkers = new ArrayList<>();
         List<float[]> markerPosProbs = new ArrayList<>();
+        String imageName = imageNameOf(project, imageData);
+        BatchShifts shifts = BatchCorrection.loadIfEnabled(project);
 
         for (int mi = 0; mi < sorted.size(); mi++) {
             String markerName = sorted.get(mi);
-            MarkerPrediction prediction = predictMarker(detectionList, project, markerName, out, true);
+            MarkerPrediction prediction =
+                    predictMarker(detectionList, project, imageName, shifts, markerName, out, true);
             if (prediction != null) {
                 activeMarkers.add(prediction.markerName);
                 markerPosProbs.add(prediction.positiveProbs);
@@ -216,9 +223,12 @@ public class CompositeClassifier {
                 + " cells...");
 
         List<MarkerPrediction> predictions = new ArrayList<>(conditions.size());
+        String imageName = imageNameOf(project, imageData);
+        BatchShifts shifts = BatchCorrection.loadIfEnabled(project);
         for (int i = 0; i < conditions.size(); i++) {
             CompositeClassificationRule.MarkerCondition condition = conditions.get(i);
-            MarkerPrediction prediction = predictMarker(detectionList, project, condition.markerName(), out, false);
+            MarkerPrediction prediction =
+                    predictMarker(detectionList, project, imageName, shifts, condition.markerName(), out, false);
             if (prediction == null) {
                 throw new IllegalStateException("Required marker not trained: " + condition.markerName());
             }
@@ -398,9 +408,22 @@ public class CompositeClassifier {
         return results;
     }
 
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    private static String imageNameOf(Project<?> project, ImageData<?> imageData) {
+        if (project == null || imageData == null) return null;
+        var entry = ((Project) project).getEntry((ImageData) imageData);
+        return entry != null ? entry.getImageName() : null;
+    }
+
+    /**
+     * @param imageName the image the cells belong to (for its batch-correction gain; may be null)
+     * @param shifts    the project's batch-correction gains if enabled, else null
+     */
     private MarkerPrediction predictMarker(
             List<PathObject> detectionList,
             Project<?> project,
+            String imageName,
+            BatchShifts shifts,
             String markerName,
             Consumer<String> out,
             boolean allowSkip)
@@ -439,7 +462,27 @@ public class CompositeClassifier {
             throw new IllegalStateException("Marker '" + markerName + "' has no XGBoost model bytes.");
         }
 
+        // A measurement this marker's model uses but the image lacks would be read as 0 for every cell.
+        List<String> missing = CellFeatureExtractor.missingFeatures(detectionList, state.featureNames);
+        if (!missing.isEmpty()) {
+            String msg = "'" + markerName + "' not applied to " + (imageName != null ? imageName : "this image")
+                    + ": missing " + missing.size() + " measurement(s) it was trained on ("
+                    + CellFeatureExtractor.summariseNames(missing, 5) + ").";
+            if (allowSkip) {
+                out.accept("Skipping " + msg);
+                return null;
+            }
+            throw new IllegalStateException(msg);
+        }
+
+        // The marker was trained on gain-corrected values when batch correction was on, so predict
+        // on the same corrected values.
+        String mismatch = BatchCorrection.mismatch(state.batchCorrectionUsed, state.batchShiftsFingerprint, shifts);
+        if (mismatch != null && mismatchReported.add(markerName)) {
+            out.accept("WARN '" + markerName + "': " + mismatch);
+        }
         CellFeatureExtractor extractor = new CellFeatureExtractor(state.featureNames);
+        BatchCorrection.applyTo(extractor, shifts, imageName);
         float[] flatData = extractor.extractMatrix(detectionList);
         int nSamples = detectionList.size();
         int nFeatures = extractor.getNumFeatures();
@@ -451,8 +494,12 @@ public class CompositeClassifier {
         float[][] lgbProbs = null;
         if (lgbBytes != null) {
             LightGBMModel lgbModel = new LightGBMModel();
-            lgbModel.loadFromBytes(lgbBytes, classNames, state.featureNames);
-            lgbProbs = lgbModel.predictProba(flatData, nSamples, nFeatures);
+            try {
+                lgbModel.loadFromBytes(lgbBytes, classNames, state.featureNames);
+                lgbProbs = lgbModel.predictProba(flatData, nSamples, nFeatures);
+            } finally {
+                lgbModel.close(); // LightGBM boosters have no finalizer
+            }
         }
 
         int posIdx = 0;

@@ -44,7 +44,11 @@ final class TrainingOrchestrator {
     private TrainingOrchestrator() {} // utility class
 
     /** Supplementary training rows pooled from other project images (parallel lists). */
-    record PooledLabels(List<float[]> rows, List<String> labels) {}
+    /**
+     * @param skippedMissing images whose labels were not used because they lack some of the
+     *                       training measurements → the missing names
+     */
+    record PooledLabels(List<float[]> rows, List<String> labels, Map<String, List<String>> skippedMissing) {}
 
     /**
      * Pool labelled cells from every <em>other</em> project image (within {@code scope}) into
@@ -71,6 +75,7 @@ final class TrainingOrchestrator {
         List<float[]> supplementaryRows = new ArrayList<>();
         List<String> supplementaryLabels = new ArrayList<>();
         int skippedClass = 0;
+        Map<String, List<String>> skippedMissing = new LinkedHashMap<>();
 
         List<ProjectImageEntry<BufferedImage>> allEntries = project.getImageList();
         var currentEntry = project.getEntry(currentImageData);
@@ -102,6 +107,16 @@ final class TrainingOrchestrator {
                 var otherHierarchy = otherImageData.getHierarchy();
                 var otherDetections = otherHierarchy.getDetectionObjects();
                 if (otherDetections.isEmpty()) continue;
+
+                // Missing measurements would be read as 0 for every cell: leave the image out.
+                List<String> missing = CellFeatureExtractor.missingFeatures(otherDetections, featureNames);
+                if (!missing.isEmpty()) {
+                    skippedMissing.put(entry.getImageName(), missing);
+                    trainLog.accept("  ! Skipped " + otherLabels.size() + " labels on " + entry.getImageName()
+                            + ": missing " + missing.size() + " measurement(s) used for training ("
+                            + CellFeatureExtractor.summariseNames(missing, 5) + ")");
+                    continue;
+                }
 
                 var otherExtractor = new CellFeatureExtractor(featureNames);
                 otherExtractor.setNormalizer(normalizer);
@@ -138,7 +153,7 @@ final class TrainingOrchestrator {
                     + " labels on other images whose class is not in the current class list.");
         }
         trainLog.accept("Pooled total: " + supplementaryRows.size() + " rows.");
-        return new PooledLabels(supplementaryRows, supplementaryLabels);
+        return new PooledLabels(supplementaryRows, supplementaryLabels, skippedMissing);
     }
 
     /**
@@ -187,6 +202,8 @@ final class TrainingOrchestrator {
      * @param normalizer           feature normalizer applied during extraction (may be null)
      * @param scope                the active binary marker (predictions are saved under it), or null
      * @param hierarchyEventSource source object for {@code fireHierarchyChangedEvent}
+     * @param skippedMissing       filled with images not classified because they lack some of the
+     *                             model's measurements → the missing names (thread-safe map)
      * @param trainLog             progress sink
      * @return the number of images successfully classified and saved
      */
@@ -201,6 +218,7 @@ final class TrainingOrchestrator {
             qupath.ext.spclassify.model.BatchShifts batchShifts,
             String scope,
             Object hierarchyEventSource,
+            Map<String, List<String>> skippedMissing,
             Consumer<String> trainLog) {
         var currentEntry = project.getEntry(currentImageData);
         String currentImageName = currentEntry != null ? currentEntry.getImageName() : null;
@@ -257,6 +275,15 @@ final class TrainingOrchestrator {
                     var otherDetections = otherImageData.getHierarchy().getDetectionObjects();
                     if (otherDetections.isEmpty()) {
                         trainLog.accept("[" + imgNameFinal + "] Skipped (no detections)");
+                        return;
+                    }
+                    // Missing measurements would be read as 0 for every cell: do not classify.
+                    List<String> missing = CellFeatureExtractor.missingFeatures(otherDetections, featureNames);
+                    if (!missing.isEmpty()) {
+                        skippedMissing.put(imgNameFinal, missing);
+                        trainLog.accept("[" + imgNameFinal + "] Skipped: missing " + missing.size()
+                                + " measurement(s) the classifier was trained on ("
+                                + CellFeatureExtractor.summariseNames(missing, 5) + ")");
                         return;
                     }
 

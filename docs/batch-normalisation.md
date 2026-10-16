@@ -31,6 +31,8 @@ Open it from *Extensions → SP Classify → Batch Normalisation...*.
 There are two separate options:
 
 - **In memory (recommended):** tick **Use batch-corrected values in clustering + ML (streamed, no columns)**. Clustering, training and classification then use corrected values in memory. Cell measurements are not changed. The setting is also in *Edit → Preferences → SP Classify* as **Use batch-corrected values**. It stays on until you untick it, and does nothing until a fit exists.
+
+  A trained classifier records whether correction was on and which fit it used. If either has changed when the classifier predicts (the setting was toggled, or the gains were re-fitted), a warning says what changed and prediction uses the current setting. Retrain to match. Composite classification applies each marker's gains in the same way.
 - **Write corrected columns:** adds a `<marker>: Cell: Mean (batchnorm)` column for each corrected marker, for export or inspection. The raw columns are kept.
 
 ### 19.5 Tips & cautions

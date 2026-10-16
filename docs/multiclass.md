@@ -28,6 +28,8 @@ Click **Apply to which images...** in the sidebar.
 
 Choose fewer images to make the apply step faster.
 
+An image that lacks any measurement the classifier was trained on (for example a renamed channel, or cells measured with different settings) is not classified, and its saved labels are not used for training. A dialog after training lists these images and the missing measurements. The same check applies when the open image is classified for Review or Manual Label mode, and to each marker in composite classification.
+
 ### 5.3 CPU threads and Images at once
 
 ![Compute settings: Rounds, Max depth, CPU threads, Images at once](doc_images/classifier_compute_settings.png)
