@@ -43,8 +43,10 @@ final class ProjectPredictionSummary {
      * @param liveCurrentPredictions the open image's in-memory predictions (may be null); used
      *                               in place of the saved file for the current image
      * @param scope                  the active binary marker, or null for multi-class
+     * @param classNames             the loaded classifier's classes (may be null); saved
+     *                               predictions made with a different class list are not counted
      */
-    static void show(QuPathGUI qupath, PopulationSet liveCurrentPredictions, String scope) {
+    static void show(QuPathGUI qupath, PopulationSet liveCurrentPredictions, String scope, List<String> classNames) {
         var project = qupath.getProject();
         if (project == null) {
             Dialogs.showErrorMessage(EXTENSION_NAME, resources.getString("classify.no_project"));
@@ -97,19 +99,18 @@ final class ProjectPredictionSummary {
                 () -> {
                     int total = imageNames.size();
                     java.util.concurrent.atomic.AtomicInteger done = new java.util.concurrent.atomic.AtomicInteger();
-                    // Capture avgCounts per image alongside the row (rows themselves are immutable).
-                    java.util.Map<String, Map<String, Long>> avgCountsByImage =
-                            new java.util.concurrent.ConcurrentHashMap<>();
 
                     // Parallel JSON load — independent files per image, IO+CPU bound.
                     List<SummaryInputRow> sourceRows = imageNames.parallelStream()
                             .map(imageName -> {
                                 PopulationSet predictions = null;
+                                boolean live = false;
                                 if (currentImageNameFinal != null
                                         && currentImageNameFinal.equals(imageName)
                                         && liveCurrent != null
                                         && liveCurrent.size() > 0) {
                                     predictions = liveCurrent;
+                                    live = true;
                                 } else {
                                     try {
                                         predictions =
@@ -121,18 +122,8 @@ final class ProjectPredictionSummary {
                                                 ex.getMessage());
                                     }
                                 }
-                                SummaryInputRow row;
-                                if (predictions == null || predictions.size() == 0) {
-                                    row = new SummaryInputRow(
-                                            imageName, 0L, 0L, "No saved predictions for this image.");
-                                } else {
-                                    long predicted = predictions.size();
-                                    long disagreements = predictions.getDisagreementCount();
-                                    Map<String, Long> avgCounts = predictions.getAvgCounts();
-                                    avgCountsByImage.put(imageName, avgCounts);
-                                    row = new SummaryInputRow(
-                                            imageName, predicted, disagreements, formatClassCounts(avgCounts));
-                                }
+                                // The open image's in-memory predictions come from the loaded model.
+                                SummaryInputRow row = inputRow(imageName, predictions, live ? null : classNames);
                                 int c = done.incrementAndGet();
                                 javafx.application.Platform.runLater(() -> {
                                     bar.setProgress((double) c / total);
@@ -144,10 +135,9 @@ final class ProjectPredictionSummary {
 
                     var analyzerInputs = new ArrayList<CohortAnomalyReport.ImageInput>(sourceRows.size());
                     for (var src : sourceRows) {
-                        Map<String, Long> avg = avgCountsByImage.get(src.imageName());
-                        if (src.predictedCells() > 0 && avg != null) {
+                        if (src.predictedCells() > 0 && src.avgCounts() != null) {
                             analyzerInputs.add(new CohortAnomalyReport.ImageInput(
-                                    src.imageName(), src.predictedCells(), src.disagreements(), avg));
+                                    src.imageName(), src.predictedCells(), src.disagreements(), src.avgCounts()));
                         }
                     }
                     var anomalyReport = CohortAnomalyAnalyzer.analyze(analyzerInputs);
@@ -166,6 +156,32 @@ final class ProjectPredictionSummary {
                 "sp-classify-summary-load");
         t.setDaemon(true);
         t.start();
+    }
+
+    static final String NO_PREDICTIONS = "No saved predictions for this image.";
+    static final String DIFFERENT_CLASSES =
+            "Predictions made with a different class list. Apply the classifier to this image again.";
+
+    /**
+     * One image's summary input. Predictions made with a class list other than
+     * {@code classNames} get no counts, so they are left out of the cohort anomaly scoring.
+     *
+     * @param classNames the loaded classifier's classes, or null to skip the check
+     */
+    static SummaryInputRow inputRow(String imageName, PopulationSet predictions, List<String> classNames) {
+        if (predictions == null || predictions.size() == 0) {
+            return new SummaryInputRow(imageName, 0L, 0L, NO_PREDICTIONS, null);
+        }
+        if (!ProjectStateManager.predictionsMatchClasses(predictions, classNames)) {
+            return new SummaryInputRow(imageName, 0L, 0L, DIFFERENT_CLASSES, null);
+        }
+        Map<String, Long> avgCounts = predictions.getAvgCounts();
+        return new SummaryInputRow(
+                imageName,
+                predictions.size(),
+                predictions.getDisagreementCount(),
+                formatClassCounts(avgCounts),
+                avgCounts);
     }
 
     private static ProjectPredictionSummaryView.Row buildPredictionSummaryRow(
@@ -257,5 +273,10 @@ final class ProjectPredictionSummary {
         return String.join("; ", parts);
     }
 
-    private record SummaryInputRow(String imageName, long predictedCells, long disagreements, String classCountsText) {}
+    record SummaryInputRow(
+            String imageName,
+            long predictedCells,
+            long disagreements,
+            String classCountsText,
+            Map<String, Long> avgCounts) {}
 }

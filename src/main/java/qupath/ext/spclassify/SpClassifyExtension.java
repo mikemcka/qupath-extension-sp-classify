@@ -1060,7 +1060,8 @@ public class SpClassifyExtension implements QuPathExtension, BinaryClassifierMan
     void showProjectPredictionSummary(QuPathGUI qupath) {
         // Ensure latest in-memory predictions for current image are included in the summary.
         persistCurrentImagePredictions(qupath);
-        ProjectPredictionSummary.show(qupath, predAll, activeBinaryMarker);
+        ProjectPredictionSummary.show(
+                qupath, predAll, activeBinaryMarker, classifier != null ? classifier.getClassNames() : null);
     }
 
     private void showFeatureImportance(QuPathGUI qupath) {
