@@ -36,7 +36,7 @@ Header (commented):
 Image,Label,CentroidX,CentroidY,Feature1,Feature2,...
 ```
 
-Exports raw feature values (the values the classifier uses) for labelled cells only.
+Exports raw feature values for labelled cells only. Batch correction is not applied, even when the classifier uses it.
 
 In multi-class mode the export includes labels from the current image and all other project images. In **binary mode** use **Export → Active Binary Ground Truth...** instead. It exports only the active marker and includes training rows imported from other projects, so the file can be moved between projects without losing rows.
 
@@ -47,7 +47,7 @@ In multi-class mode the export includes labels from the current image and all ot
 After choosing the CSV, pick one of two modes:
 
 1. **Spatial Match** (per image) — each imported row is matched to the nearest detection by centroid distance, up to a maximum distance you set (default 20 px). Rows with no detection within that distance are skipped. Use this to re-import labels onto the **same** image they were exported from.
-2. **Training Data Only** (cross-project) — imports the feature values and labels without matching them to cells. Use this when the source image is not in the current project. The rows are used in the next training run in the same way as labels on cells. The sidebar shows the count as `Imported rows: N`.
+2. **Training Data Only** (cross-project) — imports the feature values and labels without matching them to cells. Use this when the source image is not in the current project. The rows are used in the next training run in the same way as labels on cells. Labels such as `X-mergedInto(Y)` are trained as `Y`. The sidebar shows the count as `Imported rows: N`.
 
 For binary mode use **Import → Active Binary Ground Truth...**. It has the same two modes but applies only to the active marker.
 

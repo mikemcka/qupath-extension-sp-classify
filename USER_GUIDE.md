@@ -225,7 +225,7 @@ If you set no transform here, clustering runs on z-scored raw values. arcsinh ad
 
 **Menu:** *Extensions → SP Classify → Class Control...*
 
-A dialog with 4 tabs for managing QuPath's class list **and** the labels saved under `<project>/celltune/image-labels/`.
+A dialog with 4 tabs for managing QuPath's class list **and** the labels saved under `<project>/celltune/image-labels/`. The class lists reload when the dialog opens and when you switch tab.
 
 #### Add tab
 Type a class name and click **Add Class**. This adds the class to QuPath's class list only. Label files are not changed.
@@ -237,7 +237,7 @@ Type a class name and click **Add Class**. This adds the class to QuPath's class
 
 #### Merge tab
 - Select one or more source classes (Ctrl/Cmd+click), then type a target name or pick one from **Existing:**.
-- **Merge Selected → Target** renames every matching label in all images. The original name is kept in the saved label: `test1` merged into `myType` is saved as `test1-mergedInto(myType)`. Training uses the target class (`myType`). Undo it from the **Undo Merge** tab. Class names must match the labels exactly, including case and a trailing `*` (e.g. `ignore*`); if no saved label uses the selected classes, a warning says so and nothing is changed.
+- **Merge Selected → Target** renames every matching label in all images. The original name is kept in the saved label: `test1` merged into `myType` is saved as `test1-mergedInto(myType)`. Training uses the target class (`myType`). Undo it from the **Undo Merge** tab. Class names must match the labels exactly, including case and a trailing `*` (e.g. `ignore*`); if no saved label uses the selected classes, a warning says that no labels were changed. The class list is still updated: the target is added and the sources are removed.
 
 #### Undo Merge tab
 - Pick a class that was a merge target. The list shows classes found in `-mergedInto(...)` labels.
@@ -357,6 +357,7 @@ Click **Manual Label Mode** in the sidebar. A floating toolbar opens:
 - The selected cell has a magenta ring.
 - Up to 12 class buttons are shown in the toolbar. Other classes are under **All Classes ▼**.
 - **Auto-advance to next detection**: when ticked, the next cell is selected after you assign a label.
+- Cells that are already selected when the toolbar opens, or after you switch image, are used as the selection.
 
 **How many cells to label:** label at least 20–30 cells per class before the first training run. Training does not start with fewer than 10 labelled cells in total. With **Pool labels from all images** ticked (always on in binary mode), labels on other images count towards the 10. Add more labels after each review cycle.
 
@@ -418,9 +419,9 @@ Leave this at the default (`SMOTE + Tomek`) unless you have a specific reason to
 
 Use `SMOTE` alone if Tomek links removes too many labelled cells (the training log shows how many it removed). Use `ADASYN` if a small class is often confused with a larger one.
 
-**Train/val metrics** produces the **Training Metrics** report (§5.6). It adds about a third to training time and does not change the trained classifier. Untick it while you are still adding labels, and tick it again for your final run.
+**Train/val metrics** produces the **Training Metrics** report (§5.6). It adds about a third to training time. It does not change the trained classifier unless **Auto-tune** is ticked: with metrics on, auto-tune uses only the training 80%, so the settings it chooses can differ. Untick it while you are still adding labels, and tick it again for your final run.
 
-**Auto-tune** tests different model settings and keeps the best settings for each model. It trains 2 × **Trials** × **CV folds** models. The defaults are 20 trials and 5 folds, which is 200 models. Trials can be set from 5 to 100 and CV folds from 2 to 10; these controls are shown when **Auto-tune hyperparameters** is ticked. With many features and classes this can take several hours. The training log shows the number of models before it starts.
+**Auto-tune** tests different model settings and keeps the best settings for each model. It trains 2 × **Trials** × **CV folds** models. The defaults are 20 trials and 5 folds, which is 200 models. Trials can be set from 5 to 100 and CV folds from 2 to 10; these controls are shown when **Auto-tune hyperparameters** is ticked. With many features and classes this can take several hours. The training log shows the number of models before it starts. With **Train/val metrics** ticked, auto-tune uses only the training 80%, so the 20% in the Training Metrics report is not used to choose settings. Its scoring macro F1 averages only the classes present in each fold.
 
 **Model 1 and Model 2.** The default is XGBoost (Model 1) and LightGBM (Model 2). Random Forest is also available. Use two different model types: review mode depends on the two models disagreeing. Training refuses XGBoost + XGBoost and LightGBM + LightGBM, because the two slots would give identical predictions. Random Forest's confidence is the fraction of its trees that vote for the class. Training runs on the CPU only.
 
@@ -428,8 +429,9 @@ Use `SMOTE` alone if Tomek links removes too many labelled cells (the training l
 
 - With **Early stopping** ticked (the default), Rounds is a maximum. Each model stops adding rounds when it stops improving on held-out cells from the training 80% (5-fold cross-validation below 2,000 labelled cells, a 10% inner split above). The 20% validation set used for **Training Metrics** is not used to choose rounds.
 - With **Early stopping** unticked, every round is trained. Lower Rounds to reduce training time.
+- Early stopping applies to XGBoost and LightGBM only, and needs at least 20 labelled cells; with fewer, every round is trained. Random Forest always uses 100 trees of depth 100 and ignores Rounds and Max depth.
 
-The training log shows the rounds each model used, e.g. `XGBoost early stopping: best round 127/500`. If the number is close to the maximum, raise **Rounds**.
+The training log shows the rounds each model used, e.g. `XGBoost early stopping: best round 127/500 (mean weighted val loss over 5 folds: 0.593412)`. If the number is close to the maximum, raise **Rounds**.
 
 ### 5.5 Train
 
@@ -450,11 +452,14 @@ The log starts with the cell and label counts, every setting used and the availa
 ── Where the time went ──────────────────────────────────
   fit XGBoost                326.61s   45.7%
   early stop: XGBoost        293.93s   41.1%
+  early stop: folds            4.02s    0.6%
   apply to other images      118.40s    9.2%
   predict all cells           39.88s    5.6%
 ```
 
 If training is slow, this table shows which step took longest. If a run fails, the last line names the step that failed.
+
+If training fails before any model is retrained (for example, too few classes), the previous classifier stays loaded. If it fails after a model was partly retrained, no classifier is loaded until you train again or reopen the project.
 
 ### 5.6 Inspecting the result
 
@@ -472,6 +477,8 @@ Three buttons become available after training: **Agreement Confusion Matrix**, *
 - **Summary line:** `Total: X cells | Agreement: Y (Z%) | Disagreement: A (B%) | Macro Dice: D`. Macro Dice is the mean Dice over all classes.
 
 If most cells are on the diagonal, the two models mostly agree. A large value off the diagonal shows two classes the models often confuse (e.g. CD4 and CD8). Label more cells of those two classes in the next round.
+
+The **Image:** selector at the top switches to another image's saved predictions or to **All Images (Combined)**. Images whose saved predictions were made with a different class list are left out of the combined matrix, and the window title gives the number skipped. Choosing one of those images on its own shows a warning instead.
 
 ![Inter-model agreement confusion matrix](doc_images/agreement_confusion_matrix.png)
 
@@ -507,14 +514,14 @@ The line above the tables gives the number of labelled cells in the 80% and 20% 
 ![Validation confusion matrix](doc_images/validation_confusion_matrix.png)
 
 **Exports:**
-- **Download CSV…** (Training Metrics window): long format `split,model,class,precision,recall,f1,support`. Summary rows have the class `__accuracy__`, `__macro_f1__` or `__weighted_f1__`, so you can filter them out in pandas or R.
+- **Download CSV…** (Training Metrics window): long format `split,model,class,precision,recall,f1,support`. Summary rows have the class `__accuracy__`, `__macro_f1__` or `__weighted_f1__`, so you can filter them out in pandas or R. A class that is not in the set has support 0 and is not included in `__macro_f1__`.
 - **Download PNG…** (Validation Confusion Matrix window): both heatmaps side by side. This window also has **Download CSV…**.
 
 > **A high F1 score does not mean the classifier works on new images.** The validation cells come from the same images as the training cells, so F1 overestimates performance on other images. To check, open a different image, apply the classifier, look at the results, and check the Project Prediction Summary (§[8](#8-project-prediction-summary)). If predictions on an image look wrong, label some of its cells and retrain.
 
 #### Feature Importance (button)
 
-**Feature Importance...** shows the 10 features that most affect each class's prediction (mean |SHAP| value), as horizontal bars. Use the **Class:** dropdown to switch class. Values come from the XGBoost model and from any Random Forest model. LightGBM is not included, so with the default pair (XGBoost + LightGBM) the chart shows XGBoost only.
+**Feature Importance...** shows the 10 features that most affect each class's prediction (mean |SHAP| value), as horizontal bars. Use the **Class:** dropdown to switch class. Values come from the XGBoost model and from any Random Forest model (for Random Forest, split importance: mean decrease in impurity). With batch correction on, the open image's gains are applied. LightGBM is not included, so with the default pair (XGBoost + LightGBM) the chart shows XGBoost only.
 
 Use it to find features to remove:
 
@@ -550,9 +557,10 @@ Use this to train one classifier per marker (e.g. one for CD3 positive/negative,
 2. Select the marker in the list and click **Open**. The dialog closes and the sidebar switches to **Binary Mode**, with the banner `Active binary mode: CD3` in blue.
 
 In binary mode:
-- The Manual Label Mode class buttons are limited to `CD3_pos` and `CD3_neg`.
+- The Manual Label Mode class buttons are limited to `CD3+` and `CD3-`.
 - **Pool labels from all images** is ticked and cannot be changed.
 - Settings, sampling, review and metrics work as in multi-class mode.
+- Predictions are saved per marker in `<project>/celltune/binary-image-predictions/<marker>/`. Entering or leaving binary mode saves the current predictions and loads the other mode's saved ones. Labels on other images that are not `CD3+` or `CD3-` are skipped.
 
 Repeat train → review → retrain until the Training Metrics F1 stops improving and the predictions look correct on images you did not label. Then click **Exit Binary Mode** to return to multi-class mode.
 
@@ -562,7 +570,7 @@ Repeat for each marker you want in the composite.
 
 **Menu:** *Extensions → SP Classify → Composite Classification...*
 
-- **Markers**: one checkbox per trained binary classifier, all ticked by default. Markers you have not trained are not listed. **All** / **None** tick or untick every marker.
+- **Markers**: one checkbox per trained binary classifier, all ticked by default. Only markers whose classifier has a saved XGBoost model are listed. **All** / **None** tick or untick every marker.
 - **Images**: one checkbox per project image, all ticked by default. Buttons: **All** / **None** / **Current only**.
 - **Prepend current primary classification (colour follows primary)**: see below.
 - **Apply**: runs the classifiers.
@@ -571,6 +579,8 @@ Repeat for each marker you want in the composite.
 - The open image updates in the viewer immediately. Other selected images are opened, classified and saved. Progress is shown in the dialog's log.
 - Each cell gets a class made of the marker names in text sort order, each followed by `+` or `-`, e.g. `CD3+:CD45+:CD8-`. In text sort order `CD45` comes before `CD8`.
 - A marker is `+` when its binary classifier gives a positive probability of 0.5 or higher, and `-` otherwise.
+- The positive probability is the mean of the XGBoost and LightGBM probabilities (XGBoost alone if the marker has no LightGBM model). Each marker uses the batch-correction gains, when correction is on.
+- If an image lacks a measurement a marker was trained on, that marker is left out of the class names for that image, and the log line starts `Skipping '<marker>' not applied`.
 
 **Prepend current primary classification** (off by default):
 - Unticked: the class name has the marker results only (`CD3+:CD8-`). QuPath assigns the colour.
@@ -613,7 +623,7 @@ To label a cell that is not in the queue, click it in the viewer. Ctrl-click (Cm
 - **XGB: CD8 (87%)** (blue): accept Model 1's prediction.
 - **LGB: CD4 (65%)** (pink): accept Model 2's prediction.
 
-Each button starts with its model's type: **XGB** (XGBoost), **LGB** (LightGBM) or **RF** (Random Forest). If both models are the same type, the buttons read e.g. **RF 1** and **RF 2**.
+Each button starts with its model's type: **XGB** (XGBoost), **LGB** (LightGBM) or **RF** (Random Forest). If both models are the same type (only Random Forest + Random Forest is allowed), the buttons read **RF 1** and **RF 2**.
 - **Both: CD8 (90%)**: shown instead of the two buttons when the models agree. The percentage is the mean of the two models' confidence.
 - **Avg: Treg** (green, no percentage): shown only when averaging the two models' probabilities gives a class that neither model chose. Click it to accept that class.
 - **All Classes ▼**: choose any other class.
@@ -621,7 +631,7 @@ Each button starts with its model's type: **XGB** (XGBoost), **LGB** (LightGBM) 
 
 The toolbar header also shows the names of any annotations containing the current cell, e.g. `◆ Tumour, Stroma`.
 
-When you open a different image, its saved predictions are loaded. If it has none, the trained classifier is applied to it when you enter review mode, so you do not need a separate prediction step.
+When you open a different image, its saved predictions are loaded. If it has none, the trained classifier is applied to it when you enter review mode, so you do not need a separate prediction step. Saved predictions made with a different class list are ignored. An image that lacks a measurement the classifier was trained on is not classified, and a warning is shown.
 
 **Channel display.** If you have set up a channel mapping (§[4.4](#44-channel-mapping-for-review-marker-table)):
 - Tick **Auto-select channels during review** to show only the channels mapped to the current cell's predicted class.
@@ -648,7 +658,7 @@ After review, click **Train** again to train with the new labels.
 
 **Menu:** *Extensions → SP Classify → Project Prediction Summary...*
 
-Shows one row per project image, using the saved predictions in `<project>/celltune/image-predictions/`, and gives each image an anomaly score so you can find the images to check first. See [How the anomaly score is calculated](#anatomy-of-the-anomaly-score).
+Shows one row per project image, using the saved predictions in `<project>/celltune/image-predictions/`, and gives each image an anomaly score so you can find the images to check first. See [How the anomaly score is calculated](#anatomy-of-the-anomaly-score). In binary mode it reads `<project>/celltune/binary-image-predictions/<marker>/`. An image whose saved predictions were made with a different class list shows `Predictions made with a different class list. Apply the classifier to this image again.` and gets no anomaly score.
 
 > To check images before cell segmentation, using pixel values only, see §[17 Image pixel prescreen](#17-image-pixel-prescreen-whole-image-qc-no-cells-needed).
 
@@ -1118,7 +1128,7 @@ Header (commented):
 Image,Label,CentroidX,CentroidY,Feature1,Feature2,...
 ```
 
-Exports raw feature values (the values the classifier uses) for labelled cells only.
+Exports raw feature values for labelled cells only. Batch correction is not applied, even when the classifier uses it.
 
 In multi-class mode the export includes labels from the current image and all other project images. In **binary mode** use **Export → Active Binary Ground Truth...** instead. It exports only the active marker and includes training rows imported from other projects, so the file can be moved between projects without losing rows.
 
@@ -1129,7 +1139,7 @@ In multi-class mode the export includes labels from the current image and all ot
 After choosing the CSV, pick one of two modes:
 
 1. **Spatial Match** (per image) — each imported row is matched to the nearest detection by centroid distance, up to a maximum distance you set (default 20 px). Rows with no detection within that distance are skipped. Use this to re-import labels onto the **same** image they were exported from.
-2. **Training Data Only** (cross-project) — imports the feature values and labels without matching them to cells. Use this when the source image is not in the current project. The rows are used in the next training run in the same way as labels on cells. The sidebar shows the count as `Imported rows: N`.
+2. **Training Data Only** (cross-project) — imports the feature values and labels without matching them to cells. Use this when the source image is not in the current project. The rows are used in the next training run in the same way as labels on cells. Labels such as `X-mergedInto(Y)` are trained as `Y`. The sidebar shows the count as `Imported rows: N`.
 
 For binary mode use **Import → Active Binary Ground Truth...**. It has the same two modes but applies only to the active marker.
 
@@ -1198,15 +1208,15 @@ Locks every annotation so it cannot be moved or edited by mistake. Choose **Curr
 | **CPU threads** | 0 (all) | Number of CPU threads training uses; 0 = all cores. Lower it to keep QuPath responsive during training. Remembered between sessions. See §5.3. |
 | **Images at once** | 1 | Number of images classified at the same time by **Apply to which images...** after training (1–8). Each image is loaded whole, so higher values use more memory. Does not affect training. |
 | **Model 1** | XGBoost | First model type. |
-| **Model 2** | LightGBM | Second model type. Use a different type from Model 1, so the two models disagree on uncertain cells. |
-| **Pool labels from all images** | ✅ | Train on labelled cells from every project image. Always on in binary mode. |
+| **Model 2** | LightGBM | Second model type. Use a different type from Model 1, so the two models disagree on uncertain cells. XGBoost + XGBoost and LightGBM + LightGBM are refused; Random Forest + Random Forest is allowed. |
+| **Pool labels from all images** | ✅ | Train on labelled cells from every project image. Always on in binary mode. Labels whose class is not in the project's class list are skipped; the training log gives the count. |
 | **Enable data balancing** | ✅ | Resample the training set to balance the classes. Untick to hide **Strategy**. |
 | **Strategy** | SMOTE + Tomek | Resampling method — see the §5.4 table. |
-| **Auto-tune hyperparameters** | ❌ | Searches for better model settings. Cost = 2 × Trials × CV folds model fits (200 at the defaults). This can take several hours on a panel with many features. |
+| **Auto-tune hyperparameters** | ❌ | Searches for better model settings. Cost = 2 × Trials × CV folds model fits (200 at the defaults). This can take several hours on a panel with many features. With **Train/val metrics** ticked, it tunes on the training 80% only. Its scoring macro F1 averages only the classes present in each fold. |
 | **Trials** | 20 | Settings combinations tried per model (5–100). Shown only when Auto-tune is ticked. |
 | **CV folds** | 5 | Cross-validation folds used to score each combination (2–10). Shown only when Auto-tune is ticked. |
-| **Early stopping** | ✅ | Stops adding rounds when the class-weighted log-loss on held-out training cells has not improved for 20 rounds. Below 2,000 labelled cells the held-out cells are 5 cross-validation folds of the training 80%; above, a 10% inner split. The 20% validation set is never used. |
-| **Train/val metrics** | ✅ | Produces the **Training Metrics** report. Adds about a third to training time. Untick to train faster without the report. |
+| **Early stopping** | ✅ | Stops adding rounds when the class-weighted log-loss on held-out training cells has not improved for 20 rounds. Below 2,000 labelled cells the held-out cells are 5 cross-validation folds of the training 80%; above, a 10% inner split. XGBoost and LightGBM only; needs at least 20 labelled cells. The 20% validation set is never used. |
+| **Train/val metrics** | ✅ | Produces the **Training Metrics** report. Adds about a third to training time. Untick to train faster without the report. With **Auto-tune** ticked, it also restricts tuning to the training 80%. |
 | **Show top 10 feature importance after training** | ✅ | Opens the SHAP feature-importance plot after training. |
 | **Auto-prune features (drop near-constant & redundant)** | ✅ | Before training, removes features that are almost constant or highly correlated with another feature of the same marker. The 5 highest-variance features of each marker are always kept. Runs only when more than 20 features are selected. Image measurements are not changed. See §[4.1](#41-select-features). |
 | **Restrict to features shared with imported data** | ❌ | Train only on features that also exist in the imported ground-truth columns (names matched ignoring case). |
@@ -1297,7 +1307,7 @@ celltune/
 │   └── ...
 │
 ├── image-sampled/                # Cell IDs already sampled for review
-├── image-predictions/            # Predictions for each image, used by Project Prediction Summary
+├── image-predictions/            # Multi-class predictions for each image (Review, Project Prediction Summary)
 ├── binary-image-predictions/     # Binary classifier predictions for each image, one folder per marker
 ├── logs/                         # Training logs (last 20 kept)
 ```
@@ -1552,7 +1562,7 @@ There are two separate options:
 
 - **In memory (recommended):** tick **Use batch-corrected values in clustering + ML (streamed, no columns)**. Clustering, training and classification then use corrected values in memory. Cell measurements are not changed. The setting is also in *Edit → Preferences → SP Classify* as **Use batch-corrected values**. It stays on until you untick it, and does nothing until a fit exists.
 
-  A trained classifier records whether correction was on and which fit it used. If either has changed when the classifier predicts (the setting was toggled, or the gains were re-fitted), a warning says what changed and prediction uses the current setting. Retrain to match. Composite classification applies each marker's gains in the same way.
+  A trained classifier records whether correction was on and which fit it used. If either has changed when the classifier predicts (the setting was toggled, or the gains were re-fitted), a warning says what changed and prediction uses the current setting. Retrain to match. Composite classification and Feature Importance apply the gains in the same way. The ground-truth export writes uncorrected values. Images missing a measurement the classifier was trained on are skipped and listed after training.
 - **Write corrected columns:** adds a `<marker>: Cell: Mean (batchnorm)` column for each corrected marker, for export or inspection. The raw columns are kept.
 
 ### 19.5 Tips & cautions

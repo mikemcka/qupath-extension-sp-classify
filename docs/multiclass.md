@@ -10,6 +10,7 @@ Click **Manual Label Mode** in the sidebar. A floating toolbar opens:
 - The selected cell has a magenta ring.
 - Up to 12 class buttons are shown in the toolbar. Other classes are under **All Classes ▼**.
 - **Auto-advance to next detection**: when ticked, the next cell is selected after you assign a label.
+- Cells that are already selected when the toolbar opens, or after you switch image, are used as the selection.
 
 **How many cells to label:** label at least 20–30 cells per class before the first training run. Training does not start with fewer than 10 labelled cells in total. With **Pool labels from all images** ticked (always on in binary mode), labels on other images count towards the 10. Add more labels after each review cycle.
 
@@ -71,9 +72,9 @@ Leave this at the default (`SMOTE + Tomek`) unless you have a specific reason to
 
 Use `SMOTE` alone if Tomek links removes too many labelled cells (the training log shows how many it removed). Use `ADASYN` if a small class is often confused with a larger one.
 
-**Train/val metrics** produces the **Training Metrics** report (§5.6). It adds about a third to training time and does not change the trained classifier. Untick it while you are still adding labels, and tick it again for your final run.
+**Train/val metrics** produces the **Training Metrics** report (§5.6). It adds about a third to training time. It does not change the trained classifier unless **Auto-tune** is ticked: with metrics on, auto-tune uses only the training 80%, so the settings it chooses can differ. Untick it while you are still adding labels, and tick it again for your final run.
 
-**Auto-tune** tests different model settings and keeps the best settings for each model. It trains 2 × **Trials** × **CV folds** models. The defaults are 20 trials and 5 folds, which is 200 models. Trials can be set from 5 to 100 and CV folds from 2 to 10; these controls are shown when **Auto-tune hyperparameters** is ticked. With many features and classes this can take several hours. The training log shows the number of models before it starts.
+**Auto-tune** tests different model settings and keeps the best settings for each model. It trains 2 × **Trials** × **CV folds** models. The defaults are 20 trials and 5 folds, which is 200 models. Trials can be set from 5 to 100 and CV folds from 2 to 10; these controls are shown when **Auto-tune hyperparameters** is ticked. With many features and classes this can take several hours. The training log shows the number of models before it starts. With **Train/val metrics** ticked, auto-tune uses only the training 80%, so the 20% in the Training Metrics report is not used to choose settings. Its scoring macro F1 averages only the classes present in each fold.
 
 **Model 1 and Model 2.** The default is XGBoost (Model 1) and LightGBM (Model 2). Random Forest is also available. Use two different model types: review mode depends on the two models disagreeing. Training refuses XGBoost + XGBoost and LightGBM + LightGBM, because the two slots would give identical predictions. Random Forest's confidence is the fraction of its trees that vote for the class. Training runs on the CPU only.
 
@@ -81,8 +82,9 @@ Use `SMOTE` alone if Tomek links removes too many labelled cells (the training l
 
 - With **Early stopping** ticked (the default), Rounds is a maximum. Each model stops adding rounds when it stops improving on held-out cells from the training 80% (5-fold cross-validation below 2,000 labelled cells, a 10% inner split above). The 20% validation set used for **Training Metrics** is not used to choose rounds.
 - With **Early stopping** unticked, every round is trained. Lower Rounds to reduce training time.
+- Early stopping applies to XGBoost and LightGBM only, and needs at least 20 labelled cells; with fewer, every round is trained. Random Forest always uses 100 trees of depth 100 and ignores Rounds and Max depth.
 
-The training log shows the rounds each model used, e.g. `XGBoost early stopping: best round 127/500`. If the number is close to the maximum, raise **Rounds**.
+The training log shows the rounds each model used, e.g. `XGBoost early stopping: best round 127/500 (mean weighted val loss over 5 folds: 0.593412)`. If the number is close to the maximum, raise **Rounds**.
 
 ### 5.5 Train
 
@@ -103,11 +105,14 @@ The log starts with the cell and label counts, every setting used and the availa
 ── Where the time went ──────────────────────────────────
   fit XGBoost                326.61s   45.7%
   early stop: XGBoost        293.93s   41.1%
+  early stop: folds            4.02s    0.6%
   apply to other images      118.40s    9.2%
   predict all cells           39.88s    5.6%
 ```
 
 If training is slow, this table shows which step took longest. If a run fails, the last line names the step that failed.
+
+If training fails before any model is retrained (for example, too few classes), the previous classifier stays loaded. If it fails after a model was partly retrained, no classifier is loaded until you train again or reopen the project.
 
 ### 5.6 Inspecting the result
 
@@ -125,6 +130,8 @@ Three buttons become available after training: **Agreement Confusion Matrix**, *
 - **Summary line:** `Total: X cells | Agreement: Y (Z%) | Disagreement: A (B%) | Macro Dice: D`. Macro Dice is the mean Dice over all classes.
 
 If most cells are on the diagonal, the two models mostly agree. A large value off the diagonal shows two classes the models often confuse (e.g. CD4 and CD8). Label more cells of those two classes in the next round.
+
+The **Image:** selector at the top switches to another image's saved predictions or to **All Images (Combined)**. Images whose saved predictions were made with a different class list are left out of the combined matrix, and the window title gives the number skipped. Choosing one of those images on its own shows a warning instead.
 
 ![Inter-model agreement confusion matrix](doc_images/agreement_confusion_matrix.png)
 
@@ -160,14 +167,14 @@ The line above the tables gives the number of labelled cells in the 80% and 20% 
 ![Validation confusion matrix](doc_images/validation_confusion_matrix.png)
 
 **Exports:**
-- **Download CSV…** (Training Metrics window): long format `split,model,class,precision,recall,f1,support`. Summary rows have the class `__accuracy__`, `__macro_f1__` or `__weighted_f1__`, so you can filter them out in pandas or R.
+- **Download CSV…** (Training Metrics window): long format `split,model,class,precision,recall,f1,support`. Summary rows have the class `__accuracy__`, `__macro_f1__` or `__weighted_f1__`, so you can filter them out in pandas or R. A class that is not in the set has support 0 and is not included in `__macro_f1__`.
 - **Download PNG…** (Validation Confusion Matrix window): both heatmaps side by side. This window also has **Download CSV…**.
 
 > **A high F1 score does not mean the classifier works on new images.** The validation cells come from the same images as the training cells, so F1 overestimates performance on other images. To check, open a different image, apply the classifier, look at the results, and check the Project Prediction Summary (§[8](prediction-summary.md)). If predictions on an image look wrong, label some of its cells and retrain.
 
 #### Feature Importance (button)
 
-**Feature Importance...** shows the 10 features that most affect each class's prediction (mean |SHAP| value), as horizontal bars. Use the **Class:** dropdown to switch class. Values come from the XGBoost model and from any Random Forest model. LightGBM is not included, so with the default pair (XGBoost + LightGBM) the chart shows XGBoost only.
+**Feature Importance...** shows the 10 features that most affect each class's prediction (mean |SHAP| value), as horizontal bars. Use the **Class:** dropdown to switch class. Values come from the XGBoost model and from any Random Forest model (for Random Forest, split importance: mean decrease in impurity). With batch correction on, the open image's gains are applied. LightGBM is not included, so with the default pair (XGBoost + LightGBM) the chart shows XGBoost only.
 
 Use it to find features to remove:
 

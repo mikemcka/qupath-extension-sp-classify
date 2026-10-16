@@ -4,7 +4,7 @@
 
 **Menu:** *Extensions → SP Classify → Project Prediction Summary...*
 
-Shows one row per project image, using the saved predictions in `<project>/celltune/image-predictions/`, and gives each image an anomaly score so you can find the images to check first. See [How the anomaly score is calculated](#anatomy-of-the-anomaly-score).
+Shows one row per project image, using the saved predictions in `<project>/celltune/image-predictions/`, and gives each image an anomaly score so you can find the images to check first. See [How the anomaly score is calculated](#anatomy-of-the-anomaly-score). In binary mode it reads `<project>/celltune/binary-image-predictions/<marker>/`. An image whose saved predictions were made with a different class list shows `Predictions made with a different class list. Apply the classifier to this image again.` and gets no anomaly score.
 
 > To check images before cell segmentation, using pixel values only, see §[17 Image pixel prescreen](pixel-prescreen.md).
 
