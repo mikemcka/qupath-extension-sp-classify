@@ -420,7 +420,7 @@ Use `SMOTE` alone if Tomek links removes too many labelled cells (the training l
 
 **Auto-tune** tests different model settings and keeps the best settings for each model. It trains 2 × **Trials** × **CV folds** models. The defaults are 20 trials and 5 folds, which is 200 models. Trials can be set from 5 to 100 and CV folds from 2 to 10; these controls are shown when **Auto-tune hyperparameters** is ticked. With many features and classes this can take several hours. The training log shows the number of models before it starts.
 
-**Model 1 and Model 2.** The default is XGBoost (Model 1) and LightGBM (Model 2). Random Forest is also available. Use two different model types: review mode depends on the two models disagreeing. Training runs on the CPU only.
+**Model 1 and Model 2.** The default is XGBoost (Model 1) and LightGBM (Model 2). Random Forest is also available. Use two different model types: review mode depends on the two models disagreeing. Training refuses XGBoost + XGBoost and LightGBM + LightGBM, because the two slots would give identical predictions. Random Forest's confidence is the fraction of its trees that vote for the class. Training runs on the CPU only.
 
 **Rounds / Max depth.** The defaults are 500 rounds (range 50–1000) and depth 6 (range 2–15).
 
@@ -1562,7 +1562,7 @@ There are two separate options:
 - **Channel viewer:** *View → Channel viewer* shows the area under the cursor in every selected channel side by side.
 - **Run Resolve Hierarchy before exporting.** Without it, the `ParentAnnotations` column can be empty for some cells in exports; `ContainingAnnotations` still lists them. Run *Utility Scripts → Resolve Hierarchy...* first (§[13.2](#132-resolve-hierarchy)).
 - **Training Metrics overestimate accuracy on new images.** The 20% held-out cells come from the same images used for training. Check predictions on a few images with no labels before relying on the scores.
-- **Use different model types for Model 1 and Model 2.** Two models of the same type rarely disagree, so Review Mode finds few cells to review.
+- **Use different model types for Model 1 and Model 2.** Two XGBoost or two LightGBM models give identical predictions, so training refuses those pairs. Two Random Forests rarely disagree, so Review Mode finds few cells to review.
 - **Images at once is limited to 8.** Each image needs about 2–4 GB of memory on COMET data. This setting is separate from **CPU threads** — see §5.3.
 - **If training is slow, check the log.** Each run's log (`<project>/celltune/logs/training-<timestamp>.log`, last 20 kept) ends with a "Where the time went" table showing how long each step took.
 - **Channel mapping is saved per project** in `celltune/marker-table.json` and reloads when you reopen the project. To use it in another project, click **Export CSV…** in *Channel Mapping (Review Display)...* and import that CSV there. *Reset Project State* deletes it with the rest of `celltune/`.

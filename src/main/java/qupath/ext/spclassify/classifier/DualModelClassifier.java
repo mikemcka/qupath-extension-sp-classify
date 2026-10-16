@@ -68,6 +68,8 @@ public class DualModelClassifier {
     // ── Models (created lazily based on model type selection) ────────────────────
     private XGBoostModel xgbModel;
     private LightGBMModel lgbModel;
+    // Set when the current trainAndPredict run first retrains or reloads a model in place.
+    private boolean modelsChangedThisRun;
     private RandomForestModel rfModel1;
     private RandomForestModel rfModel2;
 
@@ -189,6 +191,70 @@ public class DualModelClassifier {
      *                       at the cost of {@link #hasTrainValMetrics()} being false afterwards.
      */
     public void trainAndPredict(
+            Collection<PathObject> allCells,
+            LabelStore labelStore,
+            CellFeatureExtractor extractor,
+            List<float[]> supplementaryRows,
+            List<String> supplementaryLabels,
+            ResamplingStrategy resampling,
+            boolean autoTune,
+            int tuneTrials,
+            int tuneFolds,
+            boolean earlyStop,
+            boolean computeMetrics,
+            Consumer<String> log)
+            throws Exception {
+        // The run overwrites the feature and class lists before its checks, and retrains models
+        // in place. A run that fails part-way must not leave a model labelling cells with the new
+        // class list (every class index would be shifted), so failure either restores the lists
+        // (no model touched yet) or drops the models (some retrained). The saved state on disk is
+        // only written after a successful run, so the previous model can still be reloaded.
+        List<String> previousFeatureNames = featureNames;
+        List<String> previousClassNames = classNames;
+        modelsChangedThisRun = false;
+        try {
+            trainAndPredictImpl(
+                    allCells,
+                    labelStore,
+                    extractor,
+                    supplementaryRows,
+                    supplementaryLabels,
+                    resampling,
+                    autoTune,
+                    tuneTrials,
+                    tuneFolds,
+                    earlyStop,
+                    computeMetrics,
+                    log);
+        } catch (Throwable t) {
+            if (modelsChangedThisRun) {
+                discardModels();
+                if (log != null) {
+                    log.accept("Training failed after models were partly retrained; the in-memory model was "
+                            + "discarded. Retrain, or reopen the project to load the last saved model.");
+                }
+            } else {
+                featureNames = previousFeatureNames;
+                classNames = previousClassNames;
+            }
+            throw t;
+        }
+    }
+
+    /** Drop every model so {@link #isTrained()} is false; frees LightGBM's native memory now. */
+    private void discardModels() {
+        if (lgbModel != null) lgbModel.close();
+        xgbModel = null; // XGBoost boosters are freed by their finalizer
+        lgbModel = null;
+        if (rfModel1 != null) rfModel1.close();
+        if (rfModel2 != null) rfModel2.close();
+        rfModel1 = null;
+        rfModel2 = null;
+        predALL = null;
+        setTrainingMetrics(null, null, null, null);
+    }
+
+    private void trainAndPredictImpl(
             Collection<PathObject> allCells,
             LabelStore labelStore,
             CellFeatureExtractor extractor,
@@ -1144,6 +1210,7 @@ public class DualModelClassifier {
             float sub,
             float col)
             throws Exception {
+        modelsChangedThisRun = true;
         switch (type) {
             case XGBOOST -> {
                 if (xgbModel == null) xgbModel = new XGBoostModel();
@@ -1233,6 +1300,7 @@ public class DualModelClassifier {
      */
     /** Lazily creates the shared XGBoost model, matching {@code trainModel}'s own init. */
     private XGBoostModel getOrCreateXgb() {
+        modelsChangedThisRun = true; // callers load into the live model (best-round restore)
         if (xgbModel == null) xgbModel = new XGBoostModel();
         return xgbModel;
     }

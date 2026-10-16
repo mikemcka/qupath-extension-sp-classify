@@ -595,6 +595,17 @@ public class ClassificationPanel extends VBox {
             return;
         }
 
+        // Both slots of the same boosted type share one model object and get identical settings and
+        // seed, so they would predict identically: no disagreements, and nothing to review.
+        ModelType type1 = model1Combo.getValue();
+        if (type1 == model2Combo.getValue() && type1 != ModelType.RANDOM_FOREST) {
+            Dialogs.showErrorMessage(
+                    STRINGS.getString("name"),
+                    "Model 1 and Model 2 are both " + type1 + ". They would give identical predictions, so there"
+                            + " would be no disagreements to review.\nChoose two different model types.");
+            return;
+        }
+
         // Collect labels from annotations
         if (labelStore == null) labelStore = new LabelStore("CellTune");
         collectLabelsFromAnnotations(labelStore);
