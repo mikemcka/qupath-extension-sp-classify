@@ -238,40 +238,51 @@ public class ManualLabelToolbar {
         if (imageData == null) return;
         listenedHierarchy = imageData.getHierarchy();
 
-        selectionListener = (pathObjectSelected, previousObject, allSelected) -> {
-            javafx.application.Platform.runLater(() -> {
-                // Collect all selected detections
-                selectedCells = new ArrayList<>();
-                if (allSelected != null) {
-                    for (PathObject obj : allSelected) {
-                        if (obj.isDetection()) selectedCells.add(obj);
-                    }
-                }
-
-                if (selectedCells.size() == 1) {
-                    PathObject cell = selectedCells.get(0);
-                    String id = shortId(cell);
-                    String cls =
-                            cell.getPathClass() != null ? cell.getPathClass().getName() : "unlabelled";
-                    selectedCellLabel.setText("Selected: " + id + " (" + cls + ")");
-                    statusDot.setFill(cell.getPathClass() != null ? Color.LIMEGREEN : Color.WHITE);
-                    updatePredictionButtons(cell);
-                    updateHighlightRing(cell);
-                } else if (selectedCells.size() > 1) {
-                    selectedCellLabel.setText(selectedCells.size() + " cells selected");
-                    statusDot.setFill(Color.LIMEGREEN);
-                    updatePredictionButtons(null);
-                    updateHighlightRing(null);
-                } else {
-                    selectedCellLabel.setText("Select a detection cell in the viewer");
-                    statusDot.setFill(Color.WHITE);
-                    updatePredictionButtons(null);
-                    updateHighlightRing(null);
-                }
-            });
-        };
+        selectionListener = (pathObjectSelected, previousObject, allSelected) ->
+                javafx.application.Platform.runLater(() -> showSelection(allSelected));
 
         listenedHierarchy.getSelectionModel().addPathObjectSelectionListener(selectionListener);
+
+        // The listener only fires on changes, so pick up cells that were already selected
+        // when manual mode opened (or when the image switched). Deferred so the highlight
+        // overlay is installed first.
+        var hierarchy = listenedHierarchy;
+        javafx.application.Platform.runLater(() -> {
+            if (hierarchy == listenedHierarchy) {
+                showSelection(new ArrayList<>(hierarchy.getSelectionModel().getSelectedObjects()));
+            }
+        });
+    }
+
+    /** Update the selected cells, status line, prediction buttons and ring from a selection. */
+    private void showSelection(java.util.Collection<PathObject> allSelected) {
+        // Collect all selected detections
+        selectedCells = new ArrayList<>();
+        if (allSelected != null) {
+            for (PathObject obj : allSelected) {
+                if (obj.isDetection()) selectedCells.add(obj);
+            }
+        }
+
+        if (selectedCells.size() == 1) {
+            PathObject cell = selectedCells.get(0);
+            String id = shortId(cell);
+            String cls = cell.getPathClass() != null ? cell.getPathClass().getName() : "unlabelled";
+            selectedCellLabel.setText("Selected: " + id + " (" + cls + ")");
+            statusDot.setFill(cell.getPathClass() != null ? Color.LIMEGREEN : Color.WHITE);
+            updatePredictionButtons(cell);
+            updateHighlightRing(cell);
+        } else if (selectedCells.size() > 1) {
+            selectedCellLabel.setText(selectedCells.size() + " cells selected");
+            statusDot.setFill(Color.LIMEGREEN);
+            updatePredictionButtons(null);
+            updateHighlightRing(null);
+        } else {
+            selectedCellLabel.setText("Select a detection cell in the viewer");
+            statusDot.setFill(Color.WHITE);
+            updatePredictionButtons(null);
+            updateHighlightRing(null);
+        }
     }
 
     // ── Model prediction buttons (model 1/model 2) ─────────────────────────

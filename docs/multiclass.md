@@ -11,7 +11,7 @@ Click **Manual Label Mode** in the sidebar. A floating toolbar opens:
 - Up to 12 class buttons are shown in the toolbar. Other classes are under **All Classes ▼**.
 - **Auto-advance to next detection**: when ticked, the next cell is selected after you assign a label.
 
-**How many cells to label:** label at least 20–30 cells per class before the first training run. Training does not start with fewer than 10 labelled cells in total. Add more labels after each review cycle.
+**How many cells to label:** label at least 20–30 cells per class before the first training run. Training does not start with fewer than 10 labelled cells in total. With **Pool labels from all images** ticked (always on in binary mode), labels on other images count towards the 10. Add more labels after each review cycle.
 
 > After the first training run, two more buttons appear: **Model 1: CD8 (87%)** (blue) and **Model 2: CD4 (65%)** (pink). Each shows that model's predicted class and confidence for the selected cell. Click one to accept that prediction.
 

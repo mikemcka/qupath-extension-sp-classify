@@ -358,7 +358,7 @@ Click **Manual Label Mode** in the sidebar. A floating toolbar opens:
 - Up to 12 class buttons are shown in the toolbar. Other classes are under **All Classes ▼**.
 - **Auto-advance to next detection**: when ticked, the next cell is selected after you assign a label.
 
-**How many cells to label:** label at least 20–30 cells per class before the first training run. Training does not start with fewer than 10 labelled cells in total. Add more labels after each review cycle.
+**How many cells to label:** label at least 20–30 cells per class before the first training run. Training does not start with fewer than 10 labelled cells in total. With **Pool labels from all images** ticked (always on in binary mode), labels on other images count towards the 10. Add more labels after each review cycle.
 
 > After the first training run, two more buttons appear: **Model 1: CD8 (87%)** (blue) and **Model 2: CD4 (65%)** (pink). Each shows that model's predicted class and confidence for the selected cell. Click one to accept that prediction.
 
@@ -1207,7 +1207,7 @@ Locks every annotation so it cannot be moved or edited by mistake. Choose **Curr
 | **Filter by annotation keywords** | (blank) | Comma-separated keywords. Only cells inside annotations whose names contain a keyword (any case) are sampled for review. |
 | **Apply to which images...** | (all) | Choose the project images the trained classifier is applied to. The button label shows how many are selected. |
 | **Manual Label Mode** | — | Opens the floating labelling toolbar. |
-| **Train** | — | Starts training. Needs at least 10 labelled cells. |
+| **Train** | — | Starts training. Needs at least 10 labelled cells: on the open image, in imported rows, and (with **Pool labels from all images** ticked) on other images. |
 | **Agreement Confusion Matrix** | (disabled) | Shows how often the two models agree, per class. Available after training. |
 | **Training Metrics** | (disabled) | Per-class precision, recall and F1 on a 20% held-out split. Available after training with **Train/val metrics** ticked and at least 20 labelled cells. |
 | **Feature Importance...** | (disabled) | SHAP top features per class. Available after training. |
