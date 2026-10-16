@@ -26,8 +26,13 @@ import smile.data.vector.IntVector;
  * <p>
  * Trees use the entropy (information-gain) split rule — the closest analogue to
  * Python CellTune's {@code criterion='log_loss'} — with {@code mtry = sqrt(p)}
- * random features per split and bootstrap sampling, then average class
- * probabilities across all trees (SMILE soft prediction).
+ * random features per split and row sampling (see {@code subsample} in {@link #train}). Class
+ * probabilities are the fraction of trees voting for each class.
+ * <p>
+ * Not SMILE's soft prediction: that averages each leaf's add-one-smoothed estimate
+ * {@code (count+1)/(n+k)}, and with fully grown trees (leaves of 1–3 rows) it pulls every
+ * probability towards uniform — a unanimous forest over 10 classes gave the winning class 0.50.
+ * That made RF's confidence meaningless and let the other model decide almost every averaged label.
  * <p>
  * Designed to be a drop-in alongside {@link XGBoostModel} and {@link LightGBMModel}
  * with the same method signatures. Replaced a hand-rolled pure-Java CART forest;
@@ -148,7 +153,7 @@ public class RandomForestModel {
         float[][] result = new float[nSamples][nClasses];
         double[] posteriori = new double[nClasses];
         for (int i = 0; i < nSamples; i++) {
-            forest.predict(df.get(i), posteriori);
+            forest.vote(df.get(i), posteriori);
             for (int c = 0; c < nClasses; c++) {
                 result[i][c] = (float) posteriori[c];
             }

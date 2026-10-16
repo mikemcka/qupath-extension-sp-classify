@@ -9,6 +9,7 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.function.Consumer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -71,6 +72,34 @@ public class LightGBMModel {
     private List<String> classNames;
     private List<String> featureNames;
 
+    // LGBMBooster has no finalizer, so a booster that is replaced without close() keeps its native
+    // memory until the JVM exits. Replacing closes the old one; the write lock waits for any
+    // prediction still using it (predictions take the read lock and run concurrently).
+    private final ReentrantReadWriteLock boosterLock = new ReentrantReadWriteLock();
+
+    /** Swap in a new booster and its metadata, then close the old one. {@code next} may be null. */
+    private void replaceBooster(LGBMBooster next, List<String> classNames, List<String> featureNames) {
+        boosterLock.writeLock().lock();
+        try {
+            LGBMBooster old = booster;
+            booster = next;
+            if (classNames != null) {
+                this.classNames = List.copyOf(classNames);
+                this.nClasses = classNames.size();
+            }
+            if (featureNames != null) this.featureNames = List.copyOf(featureNames);
+            if (old != null && old != next) {
+                try {
+                    old.close();
+                } catch (Exception e) {
+                    logger.warn("Error closing LightGBM booster", e);
+                }
+            }
+        } finally {
+            boosterLock.writeLock().unlock();
+        }
+    }
+
     // ── Training ────────────────────────────────────────────────────────────────
 
     /**
@@ -102,43 +131,56 @@ public class LightGBMModel {
             float colsample)
             throws Exception {
 
-        this.nClasses = classNames.size();
-        this.classNames = List.copyOf(classNames);
-        this.featureNames = List.copyOf(featureNames);
+        int nClasses = classNames.size();
 
         // Create dataset from matrix
         LGBMDataset dataset = LGBMDataset.createFromMat(flatData, nSamples, nFeatures, true, "", null);
-        // LightGBM also rejects special/non-ASCII chars in feature names
-        String[] safeNames =
-                featureNames.stream().map(XGBoostModel::sanitiseFeatureName).toArray(String[]::new);
-        dataset.setFeatureNames(safeNames);
-        dataset.setField("label", labels);
+        LGBMBooster next = null;
+        try {
+            // LightGBM also rejects special/non-ASCII chars in feature names
+            String[] safeNames =
+                    featureNames.stream().map(XGBoostModel::sanitiseFeatureName).toArray(String[]::new);
+            dataset.setFeatureNames(safeNames);
+            dataset.setField("label", labels);
 
-        // Build parameter string
-        String params = buildParams(nClasses, maxDepth, learningRate, subsample, colsample, TrainingThreads.total());
+            // Build parameter string
+            String params =
+                    buildParams(nClasses, maxDepth, learningRate, subsample, colsample, TrainingThreads.total());
 
-        // This build pins the CPU-only lightgbm4j artifact (see build.gradle.kts:
-        // "io.github.metarank:lightgbm4j").
-        booster = LGBMBooster.create(dataset, params);
-        for (int i = 0; i < numRounds; i++) {
-            // Do NOT break on updateOneIter()'s return. It is LightGBM's is_finished, and the
-            // tempting reading — "no split is worth making any more, so the rest are no-ops" — is
-            // wrong. It reports that *this iteration* added nothing, not that training has
-            // converged. With min_gain_to_split=10 and bagging_freq=1 the row sample changes every
-            // iteration, so a barren iteration is routinely followed by productive ones: measured
-            // on a multiclass fixture it went true at round 72, false again at 100, and validation
-            // loss kept improving to round 119. Breaking on it silently truncates the model.
-            booster.updateOneIter();
+            // This build pins the CPU-only lightgbm4j artifact (see build.gradle.kts:
+            // "io.github.metarank:lightgbm4j").
+            next = LGBMBooster.create(dataset, params);
+            for (int i = 0; i < numRounds; i++) {
+                // Do NOT break on updateOneIter()'s return. It is LightGBM's is_finished, and the
+                // tempting reading — "no split is worth making any more, so the rest are no-ops" — is
+                // wrong. It reports that *this iteration* added nothing, not that training has
+                // converged. With min_gain_to_split=10 and bagging_freq=1 the row sample changes every
+                // iteration, so a barren iteration is routinely followed by productive ones: measured
+                // on a multiclass fixture it went true at round 72, false again at 100, and validation
+                // loss kept improving to round 119. Breaking on it silently truncates the model.
+                next.updateOneIter();
+            }
+        } catch (Exception | Error e) {
+            if (next != null) {
+                try {
+                    next.close();
+                } catch (Exception closeEx) {
+                    e.addSuppressed(closeEx);
+                }
+            }
+            throw e;
+        } finally {
+            // Close dataset — booster keeps its own copy
+            dataset.close();
         }
+        // Only a fully trained booster replaces the current one.
+        replaceBooster(next, classNames, featureNames);
         logger.info(
                 "LightGBM training: {} samples, {} features, {} classes, {} rounds",
                 nSamples,
                 nFeatures,
                 nClasses,
                 numRounds);
-
-        // Close dataset — booster keeps its own copy
-        dataset.close();
     }
 
     // ── Early Stopping ──────────────────────────────────────────────────────────
@@ -313,9 +355,15 @@ public class LightGBMModel {
      * @throws Exception if prediction fails
      */
     public float[][] predictProba(float[] flatData, int nSamples, int nFeatures) throws Exception {
-
-        double[] rawPreds =
-                booster.predictForMat(flatData, nSamples, nFeatures, true, PredictionType.C_API_PREDICT_NORMAL);
+        double[] rawPreds;
+        int nClasses;
+        boosterLock.readLock().lock();
+        try {
+            rawPreds = booster.predictForMat(flatData, nSamples, nFeatures, true, PredictionType.C_API_PREDICT_NORMAL);
+            nClasses = this.nClasses;
+        } finally {
+            boosterLock.readLock().unlock();
+        }
 
         float[][] result = new float[nSamples][nClasses];
 
@@ -378,7 +426,13 @@ public class LightGBMModel {
         // C_API_PREDICT_CONTRIB → TreeSHAP contributions
         // Binary:     flat [nSamples * (nFeatures + 1)]
         // Multiclass: flat [nSamples * nClasses * (nFeatures + 1)]  (class-major order)
-        double[] raw = booster.predictForMat(flatData, nSamples, nFeatures, true, PredictionType.C_API_PREDICT_CONTRIB);
+        double[] raw;
+        boosterLock.readLock().lock();
+        try {
+            raw = booster.predictForMat(flatData, nSamples, nFeatures, true, PredictionType.C_API_PREDICT_CONTRIB);
+        } finally {
+            boosterLock.readLock().unlock();
+        }
 
         double[][] result = new double[nClasses][nFeatures];
         int stride = nFeatures + 1; // +1 for the bias term
@@ -422,8 +476,13 @@ public class LightGBMModel {
      * @throws Exception if serialisation fails
      */
     public byte[] toBytes() throws Exception {
-        String modelStr = booster.saveModelToString(0, 0, LGBMBooster.FeatureImportanceType.SPLIT);
-        return modelStr.getBytes(StandardCharsets.UTF_8);
+        boosterLock.readLock().lock();
+        try {
+            String modelStr = booster.saveModelToString(0, 0, LGBMBooster.FeatureImportanceType.SPLIT);
+            return modelStr.getBytes(StandardCharsets.UTF_8);
+        } finally {
+            boosterLock.readLock().unlock();
+        }
     }
 
     /**
@@ -435,13 +494,8 @@ public class LightGBMModel {
      * @throws Exception if loading fails
      */
     public void loadFromBytes(byte[] bytes, List<String> classNames, List<String> featureNames) throws Exception {
-
-        this.classNames = List.copyOf(classNames);
-        this.featureNames = List.copyOf(featureNames);
-        this.nClasses = classNames.size();
-
         String modelStr = new String(bytes, StandardCharsets.UTF_8);
-        booster = LGBMBooster.loadModelFromString(modelStr);
+        replaceBooster(LGBMBooster.loadModelFromString(modelStr), classNames, featureNames);
     }
 
     /**
@@ -449,14 +503,7 @@ public class LightGBMModel {
      * Call this when the model is no longer needed.
      */
     public void close() {
-        if (booster != null) {
-            try {
-                booster.close();
-            } catch (Exception e) {
-                logger.warn("Error closing LightGBM booster", e);
-            }
-            booster = null;
-        }
+        replaceBooster(null, null, null);
     }
 
     // ── Accessors ───────────────────────────────────────────────────────────────
