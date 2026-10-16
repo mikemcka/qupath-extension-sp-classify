@@ -78,6 +78,9 @@ public class ProjectStateManager {
         public TrainingMetrics model1ValMetrics;
         public TrainingMetrics model2TrainMetrics;
         public TrainingMetrics model2ValMetrics;
+        // Batch correction at training time; null in states saved before it was recorded.
+        public Boolean batchCorrectionUsed;
+        public String batchShiftsFingerprint;
     }
 
     /**
@@ -389,6 +392,32 @@ public class ProjectStateManager {
         state.model2TrainMetrics = m2Train;
         state.model2ValMetrics = m2Val;
         writeState(outPath, state);
+        return true;
+    }
+
+    /**
+     * Record in a saved classifier state whether batch correction was used at training, and the
+     * fingerprint of the gains. Called after the state file has been written.
+     *
+     * @param scope       the binary marker whose {@code binary/<marker>.json} to update, or null
+     *                    for the multi-class {@code classifier-state.json}
+     * @return true if the file existed and was updated
+     */
+    public static boolean saveBatchCorrectionRecord(Project<?> project, String scope, Boolean used, String fingerprint)
+            throws IOException {
+        Path ctDir = getCellTuneDir(project);
+        Path path = (scope == null || scope.isBlank())
+                ? ctDir.resolve(STATE_FILENAME)
+                : ctDir.resolve("binary").resolve(scope + ".json");
+        if (!Files.exists(path)) {
+            logger.warn("Cannot save batch-correction record: no classifier state at {}", path);
+            return false;
+        }
+        SavedState state = GSON.fromJson(Files.readString(path, StandardCharsets.UTF_8), SavedState.class);
+        if (state == null) return false;
+        state.batchCorrectionUsed = used;
+        state.batchShiftsFingerprint = fingerprint;
+        writeState(path, state);
         return true;
     }
 

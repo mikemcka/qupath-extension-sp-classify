@@ -970,6 +970,9 @@ public class ClassificationPanel extends VBox {
                         // decision below on the same raw scale.
                         List<float[]> pooledRows = null;
                         List<String> pooledLabels = null;
+                        // Images left out because they lack some training measurements → missing names.
+                        final Map<String, List<String>> skippedForMissing =
+                                new java.util.concurrent.ConcurrentHashMap<>();
                         if (poolAllImages && projectRef != null) {
                             var pooled = TrainingOrchestrator.poolLabelsFromOtherImages(
                                     projectRef,
@@ -982,6 +985,7 @@ public class ClassificationPanel extends VBox {
                                     trainLog);
                             pooledRows = pooled.rows();
                             pooledLabels = pooled.labels();
+                            skippedForMissing.putAll(pooled.skippedMissing());
                         }
 
                         // Explicitly imported training rows (if any), aligned to the
@@ -1104,6 +1108,10 @@ public class ClassificationPanel extends VBox {
                                 earlyStopSelected,
                                 computeMetricsSelected,
                                 trainLog);
+                        // Record the correction this model was trained with, so prediction can warn
+                        // if the setting or the gains change later.
+                        classifier.setBatchCorrectionRecord(
+                                trainBatchShifts != null, BatchCorrection.fingerprint(trainBatchShifts));
 
                         predAll = classifier.getPredALL();
 
@@ -1145,6 +1153,16 @@ public class ClassificationPanel extends VBox {
                                     System.err.println(
                                             "[SP Classify] Failed to persist training metrics: " + ex.getMessage());
                                 }
+                                try {
+                                    ProjectStateManager.saveBatchCorrectionRecord(
+                                            projectRef,
+                                            null,
+                                            classifier.getBatchCorrectionUsed(),
+                                            classifier.getBatchShiftsFingerprint());
+                                } catch (Exception ex) {
+                                    trainLog.accept(
+                                            "WARN: could not save the batch-correction record: " + ex.getMessage());
+                                }
                             }
 
                             // Save per-image labels for cross-image pooling
@@ -1181,6 +1199,7 @@ public class ClassificationPanel extends VBox {
                                     trainBatchShifts,
                                     scope,
                                     this,
+                                    skippedForMissing,
                                     trainLog);
                         }
                         if (runTimer != null) runTimer.writeSummary();
@@ -1202,6 +1221,19 @@ public class ClassificationPanel extends VBox {
                                     + (totalBatchApplied > 0
                                             ? "Applied to " + totalBatchApplied + " additional image(s).\n"
                                             : ""));
+                            if (!skippedForMissing.isEmpty()) {
+                                var sb = new StringBuilder(
+                                        "These images were left out of this run (their labels were not"
+                                                + " trained on and no classes were written) because they lack"
+                                                + " measurements the classifier uses:\n");
+                                new java.util.TreeMap<>(skippedForMissing)
+                                        .forEach((img, names) -> sb.append("\n")
+                                                .append(img)
+                                                .append(": ")
+                                                .append(CellFeatureExtractor.summariseNames(names, 5)));
+                                sb.append("\n\nCheck the channel names and cell measurements on these images.");
+                                Dialogs.showMessageDialog(STRINGS.getString("name"), sb.toString());
+                            }
                             trainButton.setDisable(false);
                             confusionsButton.setDisable(false);
                             // Enable Review Mode now that predictions exist; clicking it
@@ -1355,6 +1387,13 @@ public class ClassificationPanel extends VBox {
 
         // Raw features — importance is reported in the same space the classifier trains on.
         CellFeatureExtractor extractor = new CellFeatureExtractor(featureNames);
+        // The same per-image batch-correction gain the model was trained and predicts with.
+        var shapProject = qupath.getProject();
+        var shapEntry = shapProject != null ? shapProject.getEntry(imageData) : null;
+        BatchCorrection.applyTo(
+                extractor,
+                BatchCorrection.loadIfEnabled(shapProject),
+                shapEntry != null ? shapEntry.getImageName() : null);
 
         showFeatureImportanceCheckBox.setDisable(true);
         Thread worker = new Thread(

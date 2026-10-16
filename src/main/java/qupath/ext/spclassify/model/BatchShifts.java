@@ -82,6 +82,29 @@ public final class BatchShifts {
         return out;
     }
 
+    /**
+     * Short hash of the markers and every image's gains, in a fixed order. Equal fits give equal
+     * fingerprints; a re-fit (or an image added to the fit) changes it. Stored with a trained
+     * classifier so prediction can tell whether the gains changed since training.
+     */
+    public String fingerprint() {
+        try {
+            var md = java.security.MessageDigest.getInstance("SHA-256");
+            var sb = new StringBuilder();
+            sb.append(mode).append('|').append(markers).append('|');
+            if (scaleByImage != null) {
+                for (String image : new java.util.TreeSet<>(scaleByImage.keySet())) {
+                    sb.append(image).append('=').append(java.util.Arrays.toString(scaleByImage.get(image)));
+                    sb.append(';');
+                }
+            }
+            byte[] hash = md.digest(sb.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            return java.util.HexFormat.of().formatHex(hash, 0, 8);
+        } catch (java.security.NoSuchAlgorithmException e) {
+            throw new IllegalStateException(e); // SHA-256 is mandatory on every JVM
+        }
+    }
+
     /** Whether this fit has any usable per-image scales. */
     public boolean isEmpty() {
         return markers == null || markers.isEmpty() || scaleByImage == null || scaleByImage.isEmpty();

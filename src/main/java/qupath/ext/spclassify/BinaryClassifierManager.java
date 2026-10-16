@@ -209,6 +209,7 @@ final class BinaryClassifierManager {
                 classifier.setTrainingMetrics(
                         savedState.model1TrainMetrics, savedState.model1ValMetrics,
                         savedState.model2TrainMetrics, savedState.model2ValMetrics);
+                classifier.setBatchCorrectionRecord(savedState.batchCorrectionUsed, savedState.batchShiftsFingerprint);
                 host.setClassifier(classifier);
             }
         } catch (Exception ex) {

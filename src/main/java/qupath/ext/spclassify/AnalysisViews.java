@@ -446,6 +446,13 @@ final class AnalysisViews {
 
         // Raw features — importance is reported in the same space the classifier trains on.
         CellFeatureExtractor extractor = new CellFeatureExtractor(featureNames);
+        // The same per-image batch-correction gain the model was trained and predicts with.
+        var shapProject = qupath.getProject();
+        var shapEntry = shapProject != null ? shapProject.getEntry(imageData) : null;
+        BatchCorrection.applyTo(
+                extractor,
+                BatchCorrection.loadIfEnabled(shapProject),
+                shapEntry != null ? shapEntry.getImageName() : null);
 
         Thread worker = new Thread(
                 () -> {

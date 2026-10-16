@@ -182,6 +182,32 @@ public class CellFeatureExtractor {
         return matrix;
     }
 
+    /**
+     * Features that no cell in {@code cells} has as a measurement, checked on up to
+     * {@code 2000} evenly spaced cells. A missing measurement would otherwise be read as 0 for
+     * every cell (see {@link #extractRow}), which a model trained on real values treats as a
+     * real reading. Values that are present but NaN for some cells are not "missing" here.
+     *
+     * @return missing names in {@code featureNames} order; empty when all are present
+     */
+    public static List<String> missingFeatures(Collection<PathObject> cells, List<String> featureNames) {
+        if (cells == null || cells.isEmpty() || featureNames == null) return List.of();
+        List<PathObject> list = (cells instanceof List) ? (List<PathObject>) cells : new ArrayList<>(cells);
+        int step = Math.max(1, list.size() / 2000);
+        Set<String> remaining = new LinkedHashSet<>(featureNames);
+        for (int i = 0; i < list.size() && !remaining.isEmpty(); i += step) {
+            var mlist = list.get(i).getMeasurementList();
+            remaining.removeIf(mlist::containsKey);
+        }
+        return new ArrayList<>(remaining);
+    }
+
+    /** Short "a, b, c (+N more)" list for log and dialog messages. */
+    public static String summariseNames(List<String> names, int max) {
+        if (names.size() <= max) return String.join(", ", names);
+        return String.join(", ", names.subList(0, max)) + " (+" + (names.size() - max) + " more)";
+    }
+
     /** @return the ordered list of feature names this extractor uses */
     public List<String> getFeatureNames() {
         return featureNames;

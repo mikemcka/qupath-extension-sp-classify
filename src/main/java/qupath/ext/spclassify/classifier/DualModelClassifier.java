@@ -70,6 +70,12 @@ public class DualModelClassifier {
     private LightGBMModel lgbModel;
     // Set when the current trainAndPredict run first retrains or reloads a model in place.
     private boolean modelsChangedThisRun;
+
+    // Batch correction used at training (null = unknown: trained before this was recorded).
+    private Boolean batchCorrectionUsed;
+    private String batchShiftsFingerprint;
+    // So a correction mismatch is reported once per model, not on every prediction.
+    private boolean batchMismatchReported;
     private RandomForestModel rfModel1;
     private RandomForestModel rfModel2;
 
@@ -239,6 +245,33 @@ public class DualModelClassifier {
             }
             throw t;
         }
+    }
+
+    /**
+     * Record the batch correction the models were trained with (or loaded with from saved state).
+     *
+     * @param used        whether per-image gains were applied, or null if unknown
+     * @param fingerprint {@code BatchShifts.fingerprint()} of those gains, or null
+     */
+    public void setBatchCorrectionRecord(Boolean used, String fingerprint) {
+        this.batchCorrectionUsed = used;
+        this.batchShiftsFingerprint = fingerprint;
+        this.batchMismatchReported = false;
+    }
+
+    public Boolean getBatchCorrectionUsed() {
+        return batchCorrectionUsed;
+    }
+
+    public String getBatchShiftsFingerprint() {
+        return batchShiftsFingerprint;
+    }
+
+    /** True the first time it is called after a record is set; false afterwards. */
+    public boolean claimBatchMismatchReport() {
+        if (batchMismatchReported) return false;
+        batchMismatchReported = true;
+        return true;
     }
 
     /** Drop every model so {@link #isTrained()} is false; frees LightGBM's native memory now. */

@@ -280,6 +280,11 @@ public class SpClassifyExtension implements QuPathExtension, BinaryClassifierMan
                                 state.getRfModel2Bytes(),
                                 state.getModel1Type(),
                                 state.getModel2Type());
+                        ProjectStateManager.saveBatchCorrectionRecord(
+                                proj,
+                                activeBinaryMarker,
+                                cls.getBatchCorrectionUsed(),
+                                cls.getBatchShiftsFingerprint());
                         logger.info("[SP Classify] Auto-saved binary classifier state for '{}'", activeBinaryMarker);
                     } catch (Exception ex) {
                         logger.warn(
@@ -514,6 +519,8 @@ public class SpClassifyExtension implements QuPathExtension, BinaryClassifierMan
                             classifier.setTrainingMetrics(
                                     state.model1TrainMetrics, state.model1ValMetrics,
                                     state.model2TrainMetrics, state.model2ValMetrics);
+                            classifier.setBatchCorrectionRecord(
+                                    state.batchCorrectionUsed, state.batchShiftsFingerprint);
                             logger.info("[SP Classify] Restored trained classifier from saved state.");
                         }
                     }
@@ -1361,12 +1368,31 @@ public class SpClassifyExtension implements QuPathExtension, BinaryClassifierMan
             // it MUST be streamed in here too: the training extractors apply it, so a model
             // trained with correction must predict on the same corrected space or it is a
             // train/serve skew (differently-scaled features at fit vs inference).
-            var extractor = new CellFeatureExtractor(featureNames);
             var batchProject = qupath.getProject();
             String batchImageName = (batchProject != null && batchProject.getEntry(imageData) != null)
                     ? batchProject.getEntry(imageData).getImageName()
                     : null;
-            BatchCorrection.applyTo(extractor, BatchCorrection.loadIfEnabled(batchProject), batchImageName);
+            // A measurement the model was trained on but this image lacks would be read as 0 for
+            // every cell; classify nothing rather than write predictions from zero-filled inputs.
+            List<String> missing = CellFeatureExtractor.missingFeatures(detections, featureNames);
+            if (!missing.isEmpty()) {
+                String msg =
+                        "Not classifying " + (batchImageName != null ? batchImageName : "this image") + ": it has no "
+                                + missing.size() + " of the measurements the classifier was trained on ("
+                                + CellFeatureExtractor.summariseNames(missing, 5) + ").";
+                logger.warn("[SP Classify] {}", msg);
+                javafx.application.Platform.runLater(() -> Dialogs.showWarningNotification(EXTENSION_NAME, msg));
+                return false;
+            }
+            var shifts = BatchCorrection.loadIfEnabled(batchProject);
+            String mismatch = BatchCorrection.mismatch(
+                    classifier.getBatchCorrectionUsed(), classifier.getBatchShiftsFingerprint(), shifts);
+            if (mismatch != null && classifier.claimBatchMismatchReport()) {
+                logger.warn("[SP Classify] {}", mismatch);
+                javafx.application.Platform.runLater(() -> Dialogs.showWarningNotification(EXTENSION_NAME, mismatch));
+            }
+            var extractor = new CellFeatureExtractor(featureNames);
+            BatchCorrection.applyTo(extractor, shifts, batchImageName);
             classifier.predictOnly(
                     detections, extractor, true, msg -> logger.info("[SP Classify] Auto-classify: {}", msg));
             predAll = classifier.getPredALL();
