@@ -7,7 +7,7 @@
 
 📖 **Full documentation: [mikemcka.github.io/qupath-extension-sp-classify](https://mikemcka.github.io/qupath-extension-sp-classify/)**
 
-A [QuPath](https://qupath.github.io/) 0.7 extension that brings **human in the loop ative learning** to cell classification. It trains two gradient-boosted models (XGBoost + LightGBM) simultaneously, identifies cells where the models disagree, and presents those disputed cells for human review — creating an iterative loop that progressively improves classification accuracy.
+A [QuPath](https://qupath.github.io/) 0.7 extension that brings **human in the loop active learning** to cell classification. It trains two gradient-boosted models (XGBoost + LightGBM) simultaneously, identifies cells where the models disagree, and presents those disputed cells for human review — creating an iterative loop that progressively improves classification accuracy.
 
 
 ## Features
@@ -75,34 +75,6 @@ The extension JAR bundles XGBoost4J, LightGBM4J, and a pure-Java Random Forest �
 9. **Review** — click *Enter Review Mode*. You'll be prompted for how many disagreement cells to review (default 200), then step through disputed cells one-by-one. Each cell shows coloured prediction buttons (e.g. `XGB: CD4 (87%)`, `LGB: Bcell (65%)`) — click to accept. Use the *All Classes* dropdown if neither prediction is correct. If you switch to a different image, the trained classifier is automatically applied so you can review that image immediately.
 10. **Retrain** — after reviewing, click Train again. The confusion matrix should improve. Repeat until satisfied.
 11. **Export** — *Export Cell Table* opens a column picker (same search/prefix/select-all controls as *Select Features*) so you can choose which measurement columns to export, with an optional tick-box to include cell polygons in micron or pixel coordinates, then saves all cells as CSV. *Export AnnData* exports AnnData-compatible CSV with a Python H5AD conversion script. *Export Ground Truth* saves labelled cells for transfer to other images.
-
-### Marker Table Format For Automated Channel Switching
-
-The recommended way to build the mapping is the **Channel Mapping editor** (*Extensions > SP Classify >
-Channel Mapping (Review Display)...*, or **Edit channel mapping…** in the Review Mode window): pick a
-cell type, tick the image channels review should show. The mapping is saved per project to
-`<project>/celltune/marker-table.json`. A CSV remains the import / export / sharing route.
-
-The simple CSV format has `Marker1`–`Marker5` columns plus any further `Marker…` columns (no upper
-limit). Trailing columns may be left blank. A ready-to-edit
-example is provided at [`examples/marker-table-example.csv`](examples/marker-table-example.csv).
-
-```csv
-CellType,Marker1,Marker2,Marker3,Marker4,Marker5
-CD4T,CD4,CD3,,,
-Bcell,CD20,,,,
-Macrophage,CD68,CD163,CD11b,,
-Treg,CD4,CD25,FOXP3,CD3,
-```
-
-The `CellType` column should match the class names you use for your labelled cells. Matching is
-tolerant of case, spacing, and punctuation (so `CD4 T`, `cd4t`, and `CD4-T` are treated as the
-same type), and `Marker` names are matched to image channels the same way — a channel named
-`CD3 (Opal 570)` still matches the marker `CD3`. If a predicted type isn't found in the table, or
-none of its markers match any channel, the viewer's channels are left unchanged.
-
-If a CSV picks the wrong channels, open the editor, **Import CSV…**, look for `~` / `!` / `✗` rows, fix
-the ticks, **Pin all matches**, then **Save**. See [Marker table format](docs/marker-table.md) for details.
 
 ## Building from Source
 

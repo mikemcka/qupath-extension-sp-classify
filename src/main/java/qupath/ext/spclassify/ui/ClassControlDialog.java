@@ -69,6 +69,10 @@ public class ClassControlDialog {
     // ── Shared status bar ────────────────────────────────────────────────────
     private final Label statusLabel = new Label("Ready.");
 
+    // Each tab's class lists register here. The window is reused, so lists built when it was
+    // created go stale when classes change elsewhere (e.g. labels added since).
+    private final List<Runnable> classListRefreshers = new ArrayList<>();
+
     /**
      * @param qupath              the QuPath GUI instance
      * @param labelStoreSupplier  provides the current in-memory LabelStore (may return null)
@@ -107,8 +111,24 @@ public class ClassControlDialog {
     }
 
     public void show() {
+        refreshClassLists();
         if (!stage.isShowing()) stage.show();
         else stage.toFront();
+    }
+
+    /** Re-read every tab's class list from QuPath / the label files. */
+    private void refreshClassLists() {
+        for (Runnable r : classListRefreshers) r.run();
+    }
+
+    /** Replace a list's items, keeping the selected items that are still present. */
+    private static void setItemsKeepSelection(ListView<String> view, List<String> items) {
+        List<String> selected = new ArrayList<>(view.getSelectionModel().getSelectedItems());
+        view.setItems(FXCollections.observableArrayList(items));
+        for (String item : selected) {
+            int idx = items.indexOf(item);
+            if (idx >= 0) view.getSelectionModel().select(idx);
+        }
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -121,6 +141,7 @@ public class ClassControlDialog {
         var tabPane = new TabPane();
         tabPane.setTabClosingPolicy(TabPane.TabClosingPolicy.UNAVAILABLE);
         tabPane.getTabs().addAll(buildAddTab(), buildDeleteTab(), buildMergeTab(), buildUndoMergeTab());
+        tabPane.getSelectionModel().selectedItemProperty().addListener((obs, oldTab, newTab) -> refreshClassLists());
 
         statusLabel.setStyle("-fx-font-size: 11; -fx-text-fill: #555;");
         var statusBar = new HBox(statusLabel);
@@ -186,9 +207,10 @@ public class ClassControlDialog {
         var purgeCheck = new CheckBox("Also remove labels with this class from all image-label files");
         purgeCheck.setWrapText(true);
 
+        Runnable refreshList = () -> setItemsKeepSelection(classListView, currentEffectiveClassNames());
+        classListRefreshers.add(refreshList);
         var refreshBtn = new Button("Refresh list");
-        refreshBtn.setOnAction(
-                e -> classListView.setItems(FXCollections.observableArrayList(currentEffectiveClassNames())));
+        refreshBtn.setOnAction(e -> refreshList.run());
 
         var deleteBtn = new Button("Delete Selected Class");
         deleteBtn.setMaxWidth(Double.MAX_VALUE);
@@ -261,10 +283,6 @@ public class ClassControlDialog {
         sourceListView.getSelectionModel().setSelectionMode(SelectionMode.MULTIPLE);
         VBox.setVgrow(sourceListView, Priority.ALWAYS);
 
-        var refreshMergeBtn = new Button("Refresh");
-        refreshMergeBtn.setOnAction(
-                e -> sourceListView.setItems(FXCollections.observableArrayList(currentEffectiveClassNames())));
-
         // Target class — either pick an existing class or type a new one
         var targetField = new TextField();
         targetField.setPromptText("Target class name (new or existing)…");
@@ -273,6 +291,15 @@ public class ClassControlDialog {
         existingCombo.setPromptText("…or pick existing");
         existingCombo.setMaxWidth(Double.MAX_VALUE);
         existingCombo.setItems(FXCollections.observableArrayList(currentEffectiveClassNames()));
+
+        Runnable refreshMergeLists = () -> {
+            List<String> names = currentEffectiveClassNames();
+            setItemsKeepSelection(sourceListView, names);
+            existingCombo.setItems(FXCollections.observableArrayList(names));
+        };
+        classListRefreshers.add(refreshMergeLists);
+        var refreshMergeBtn = new Button("Refresh");
+        refreshMergeBtn.setOnAction(e -> refreshMergeLists.run());
         existingCombo.setOnAction(e -> {
             if (existingCombo.getValue() != null) targetField.setText(existingCombo.getValue());
         });
@@ -286,6 +313,8 @@ public class ClassControlDialog {
         mergeBtn.setMaxWidth(Double.MAX_VALUE);
         mergeBtn.setStyle("-fx-base: #337ab7;");
         mergeBtn.setOnAction(e -> {
+            // Drop selections for classes that no longer exist before merging.
+            refreshMergeLists.run();
             List<String> sources =
                     new ArrayList<>(sourceListView.getSelectionModel().getSelectedItems());
             String target = targetField.getText().trim();
@@ -326,6 +355,13 @@ public class ClassControlDialog {
                             targetField.clear();
                             setStatus("Merged " + sources.size() + " class(es) → \"" + target + "\" (" + count
                                     + " labels updated).");
+                            if (count == 0) {
+                                Dialogs.showWarningNotification(
+                                        EXTENSION_NAME,
+                                        "No saved labels use " + sourceSummary
+                                                + ", so no labels were changed. Check the class names match "
+                                                + "your labels exactly (including case and a trailing *).");
+                            }
                         });
                     } catch (Exception ex) {
                         logger.error("Merge classes failed", ex);
@@ -372,6 +408,7 @@ public class ClassControlDialog {
         var refreshUndoBtn = new Button("Refresh");
         refreshUndoBtn.setOnAction(e -> refreshUndoCombo(targetCombo));
         refreshUndoCombo(targetCombo);
+        classListRefreshers.add(() -> refreshUndoCombo(targetCombo));
 
         var infoLabel = label("Select the class that was the merge TARGET to restore all source\n"
                 + "classes to their original names. Only labels carrying\n"

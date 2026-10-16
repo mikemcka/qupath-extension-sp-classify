@@ -32,6 +32,7 @@ import qupath.ext.spclassify.io.ProjectStateManager;
 import qupath.ext.spclassify.model.CellPrediction;
 import qupath.ext.spclassify.model.LabelStore;
 import qupath.ext.spclassify.model.PopulationSet;
+import qupath.fx.dialogs.Dialogs;
 import qupath.lib.gui.QuPathGUI;
 
 /**
@@ -648,18 +649,30 @@ public class ConfusionMatrixView {
                                 try {
                                     List<String> names =
                                             ProjectStateManager.listImagesWithPredictions(project, predictionScope);
+                                    int skipped = 0;
                                     for (String name : names) {
                                         if (!predCache.containsKey(name)) {
                                             PopulationSet ps = ProjectStateManager.loadImagePredictions(
                                                     project, predictionScope, name);
-                                            if (ps != null) predCache.put(name, ps);
+                                            if (ps == null) continue;
+                                            // Another model's predictions would be partly dropped (unknown
+                                            // classes) and partly mixed into this model's matrix.
+                                            if (!ProjectStateManager.predictionsMatchClasses(ps, classNames)) {
+                                                skipped++;
+                                                continue;
+                                            }
+                                            predCache.put(name, ps);
                                         }
                                     }
                                     PopulationSet merged = mergeAllCached();
+                                    String title = "SP Classify — Agreement Matrix — All Images"
+                                            + (skipped > 0
+                                                    ? " (" + skipped + " skipped: made with a different class list)"
+                                                    : "");
                                     Platform.runLater(() -> {
                                         currentDisplayPredAll = merged;
                                         applyMode(Mode.INTER_MODEL);
-                                        stage.setTitle("SP Classify — Agreement Matrix — All Images");
+                                        stage.setTitle(title);
                                     });
                                 } catch (Exception ex) {
                                     logger.warn("Failed to merge predictions across images", ex);
@@ -680,7 +693,14 @@ public class ConfusionMatrixView {
                                     try {
                                         PopulationSet ps = ProjectStateManager.loadImagePredictions(
                                                 project, predictionScope, selected);
-                                        if (ps != null) {
+                                        if (ps != null
+                                                && !ProjectStateManager.predictionsMatchClasses(ps, classNames)) {
+                                            Platform.runLater(() -> Dialogs.showWarningNotification(
+                                                    "SP Classify",
+                                                    "The saved predictions for " + selected
+                                                            + " were made with a different class list. "
+                                                            + "Apply the classifier to this image again."));
+                                        } else if (ps != null) {
                                             predCache.put(selected, ps);
                                             Platform.runLater(() -> {
                                                 currentDisplayPredAll = ps;
