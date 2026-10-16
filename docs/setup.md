@@ -71,7 +71,7 @@ If you set no transform here, clustering runs on z-scored raw values. arcsinh ad
 
 **Menu:** *Extensions → SP Classify → Class Control...*
 
-A dialog with 4 tabs for managing QuPath's class list **and** the labels saved under `<project>/celltune/image-labels/`.
+A dialog with 4 tabs for managing QuPath's class list **and** the labels saved under `<project>/celltune/image-labels/`. The class lists reload when the dialog opens and when you switch tab.
 
 #### Add tab
 Type a class name and click **Add Class**. This adds the class to QuPath's class list only. Label files are not changed.
@@ -83,7 +83,7 @@ Type a class name and click **Add Class**. This adds the class to QuPath's class
 
 #### Merge tab
 - Select one or more source classes (Ctrl/Cmd+click), then type a target name or pick one from **Existing:**.
-- **Merge Selected → Target** renames every matching label in all images. The original name is kept in the saved label: `test1` merged into `myType` is saved as `test1-mergedInto(myType)`. Training uses the target class (`myType`). Undo it from the **Undo Merge** tab. Class names must match the labels exactly, including case and a trailing `*` (e.g. `ignore*`); if no saved label uses the selected classes, a warning says so and nothing is changed.
+- **Merge Selected → Target** renames every matching label in all images. The original name is kept in the saved label: `test1` merged into `myType` is saved as `test1-mergedInto(myType)`. Training uses the target class (`myType`). Undo it from the **Undo Merge** tab. Class names must match the labels exactly, including case and a trailing `*` (e.g. `ignore*`); if no saved label uses the selected classes, a warning says that no labels were changed. The class list is still updated: the target is added and the sources are removed.
 
 #### Undo Merge tab
 - Pick a class that was a merge target. The list shows classes found in `-mergedInto(...)` labels.

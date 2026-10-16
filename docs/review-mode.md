@@ -31,7 +31,7 @@ To label a cell that is not in the queue, click it in the viewer. Ctrl-click (Cm
 - **XGB: CD8 (87%)** (blue): accept Model 1's prediction.
 - **LGB: CD4 (65%)** (pink): accept Model 2's prediction.
 
-Each button starts with its model's type: **XGB** (XGBoost), **LGB** (LightGBM) or **RF** (Random Forest). If both models are the same type, the buttons read e.g. **RF 1** and **RF 2**.
+Each button starts with its model's type: **XGB** (XGBoost), **LGB** (LightGBM) or **RF** (Random Forest). If both models are the same type (only Random Forest + Random Forest is allowed), the buttons read **RF 1** and **RF 2**.
 - **Both: CD8 (90%)**: shown instead of the two buttons when the models agree. The percentage is the mean of the two models' confidence.
 - **Avg: Treg** (green, no percentage): shown only when averaging the two models' probabilities gives a class that neither model chose. Click it to accept that class.
 - **All Classes ▼**: choose any other class.
@@ -39,7 +39,7 @@ Each button starts with its model's type: **XGB** (XGBoost), **LGB** (LightGBM) 
 
 The toolbar header also shows the names of any annotations containing the current cell, e.g. `◆ Tumour, Stroma`.
 
-When you open a different image, its saved predictions are loaded. If it has none, the trained classifier is applied to it when you enter review mode, so you do not need a separate prediction step.
+When you open a different image, its saved predictions are loaded. If it has none, the trained classifier is applied to it when you enter review mode, so you do not need a separate prediction step. Saved predictions made with a different class list are ignored. An image that lacks a measurement the classifier was trained on is not classified, and a warning is shown.
 
 **Channel display.** If you have set up a channel mapping (§[4.4](setup.md#44-channel-mapping-for-review-marker-table)):
 - Tick **Auto-select channels during review** to show only the channels mapped to the current cell's predicted class.

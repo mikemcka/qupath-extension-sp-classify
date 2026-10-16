@@ -25,7 +25,7 @@ celltune/
 │   └── ...
 │
 ├── image-sampled/                # Cell IDs already sampled for review
-├── image-predictions/            # Predictions for each image, used by Project Prediction Summary
+├── image-predictions/            # Multi-class predictions for each image (Review, Project Prediction Summary)
 ├── binary-image-predictions/     # Binary classifier predictions for each image, one folder per marker
 ├── logs/                         # Training logs (last 20 kept)
 ```

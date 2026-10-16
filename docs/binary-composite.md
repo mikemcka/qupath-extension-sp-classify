@@ -10,9 +10,10 @@ Use this to train one classifier per marker (e.g. one for CD3 positive/negative,
 2. Select the marker in the list and click **Open**. The dialog closes and the sidebar switches to **Binary Mode**, with the banner `Active binary mode: CD3` in blue.
 
 In binary mode:
-- The Manual Label Mode class buttons are limited to `CD3_pos` and `CD3_neg`.
+- The Manual Label Mode class buttons are limited to `CD3+` and `CD3-`.
 - **Pool labels from all images** is ticked and cannot be changed.
 - Settings, sampling, review and metrics work as in multi-class mode.
+- Predictions are saved per marker in `<project>/celltune/binary-image-predictions/<marker>/`. Entering or leaving binary mode saves the current predictions and loads the other mode's saved ones. Labels on other images that are not `CD3+` or `CD3-` are skipped.
 
 Repeat train → review → retrain until the Training Metrics F1 stops improving and the predictions look correct on images you did not label. Then click **Exit Binary Mode** to return to multi-class mode.
 
@@ -22,7 +23,7 @@ Repeat for each marker you want in the composite.
 
 **Menu:** *Extensions → SP Classify → Composite Classification...*
 
-- **Markers**: one checkbox per trained binary classifier, all ticked by default. Markers you have not trained are not listed. **All** / **None** tick or untick every marker.
+- **Markers**: one checkbox per trained binary classifier, all ticked by default. Only markers whose classifier has a saved XGBoost model are listed. **All** / **None** tick or untick every marker.
 - **Images**: one checkbox per project image, all ticked by default. Buttons: **All** / **None** / **Current only**.
 - **Prepend current primary classification (colour follows primary)**: see below.
 - **Apply**: runs the classifiers.
@@ -31,6 +32,8 @@ Repeat for each marker you want in the composite.
 - The open image updates in the viewer immediately. Other selected images are opened, classified and saved. Progress is shown in the dialog's log.
 - Each cell gets a class made of the marker names in text sort order, each followed by `+` or `-`, e.g. `CD3+:CD45+:CD8-`. In text sort order `CD45` comes before `CD8`.
 - A marker is `+` when its binary classifier gives a positive probability of 0.5 or higher, and `-` otherwise.
+- The positive probability is the mean of the XGBoost and LightGBM probabilities (XGBoost alone if the marker has no LightGBM model). Each marker uses the batch-correction gains, when correction is on.
+- If an image lacks a measurement a marker was trained on, that marker is left out of the class names for that image, and the log line starts `Skipping '<marker>' not applied`.
 
 **Prepend current primary classification** (off by default):
 - Unticked: the class name has the marker results only (`CD3+:CD8-`). QuPath assigns the colour.

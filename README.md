@@ -48,7 +48,7 @@ See **[User Guide §7 — Review mode](USER_GUIDE.md#7-after-training--review-mo
 | QuPath | 0.7.0 or later |
 | Java | 25 (required by QuPath 0.7) |
 
-The extension JAR bundles XGBoost4J, LightGBM4J, and a pure-Java Random Forest — no separate ML library installation is needed.
+The extension JAR bundles XGBoost4J, LightGBM4J and Smile (used for Random Forest) — no separate ML library installation is needed.
 
 ## Installation
 
@@ -69,12 +69,12 @@ The extension JAR bundles XGBoost4J, LightGBM4J, and a pure-Java Random Forest �
 3. **Set up a channel mapping** (optional) — *Extensions > SP Classify > Channel Mapping (Review Display)...* — pick which image channels review should show for each cell type (saved per project; no limit on channels per class). Alternatively import a CSV via *Import Marker Table*, which is also the way to share a mapping between projects
 4. **Select features** (optional) — *Extensions > SP Classify > Select Features* — choose which measurements to include in training. Features are shown in a grouped, searchable checkbox tree (one group per marker, plus Morphology / Shape, Neighbors, Embeddings, and Other / Uncategorized) so 1000+-column panels stay navigable.
 5. **Clustering normalisation** (optional, clustering-only) — *Extensions > SP Classify > Clustering Normalisation* — apply arcsinh or sqrt transforms to selected features for the clustering / scatter-plot / gating workflows (the classifier always trains and predicts on raw values). Match the cofactor to your intensity scale: ~25–50 for raw fluorescence panels (COMET, CODEX; scale-dependent) or 0.05 for MIBI mass spectrometry (Hartmann et al. 2021; see [References](#references)).
-6. **Train** — click *Train* in the SP Classify panel (or *Extensions > SP Classify > Run Classification…*). If features haven't been selected yet, you'll be prompted to select them or use all. A confirmation dialog shows the feature and label counts, **Model 1** and **Model 2** type selectors (default: XGBoost + LightGBM), resampling, auto-tune, and early stopping options. If the project has multiple images, a dual-list image selector lets you choose which images to apply the trained classifier to. A progress dialog shows real-time training status.
-7. **Plot confusions** — click *Plot Confusions* to see the inter-model confusion matrix with per-class agreement rates and F1 scores
-8. **Feature importance** (optional) — *Extensions > SP Classify > Feature Importance…* — opens a bar chart of the top 10 features by mean |SHAP| value with a class selector. Alternatively tick **"Show top 10 feature importance after training"** in the training dialog to show it automatically.
-9. **Review** — click *Enter Review Mode*. You'll be prompted for how many disagreement cells to review (default 200), then step through disputed cells one-by-one. Each cell shows coloured prediction buttons (e.g. `XGB: CD4 (87%)`, `LGB: Bcell (65%)`) — click to accept. Use the *All Classes* dropdown if neither prediction is correct. If you switch to a different image, the trained classifier is automatically applied so you can review that image immediately.
+6. **Train** — in the SP Classify panel, set **Model 1** and **Model 2** (default: XGBoost + LightGBM; two XGBoost or two LightGBM models are refused), balancing, auto-tune and early stopping, choose the images to classify with **Apply to which images...**, then click **Train**. If no features are selected, every cell measurement is used. Training needs at least 10 labelled cells (with **Pool labels from all images** ticked, labels on other images count). A progress window shows the training log.
+7. **Agreement confusion matrix** — click *Agreement Confusion Matrix* to see how the two models' predictions compare, with per-class agreement rates and Dice scores
+8. **Feature importance** (optional) — click **Feature Importance...** in the panel to open a bar chart of the top 10 features by mean |SHAP| value, with a class selector. Tick **"Show top 10 feature importance after training"** in the panel to show it automatically.
+9. **Review** — click *Enter Review Mode*. You'll be prompted for how many disagreement cells to review (default 200), then step through disputed cells one-by-one. Each cell shows coloured prediction buttons (e.g. `XGB: CD4 (87%)`, `LGB: Bcell (65%)`) — click to accept. Use the *All Classes* dropdown if neither prediction is correct. When you switch to a different image, its saved predictions are loaded; if it has none made with the current classifier, the classifier is applied when you enter Review Mode. An image that lacks a measurement the classifier was trained on is not classified, and a warning is shown.
 10. **Retrain** — after reviewing, click Train again. The confusion matrix should improve. Repeat until satisfied.
-11. **Export** — *Export Cell Table* opens a column picker (same search/prefix/select-all controls as *Select Features*) so you can choose which measurement columns to export, with an optional tick-box to include cell polygons in micron or pixel coordinates, then saves all cells as CSV. *Export AnnData* exports AnnData-compatible CSV with a Python H5AD conversion script. *Export Ground Truth* saves labelled cells for transfer to other images.
+11. **Export** — *Export Cell Table* opens a column picker (same search/prefix/select-all controls as *Select Features*) so you can choose which measurement columns to export, with an optional tick-box to include cell polygons in micron or pixel coordinates, then saves all cells as CSV. *Export Ground Truth* saves labelled cells for transfer to other images.
 
 ## Building from Source
 
@@ -99,7 +99,7 @@ Source lives under `src/main/java/qupath/ext/spclassify/`, organised into `model
 | Extension host | QuPath 0.7 |
 | ML model 1 | XGBoost4J 2.1.4 (Scala 2.13) |
 | ML model 2 | LightGBM4J 4.6.0-2 |
-| ML model 3 | Random Forest (pure Java, no external dependency) |
+| ML model 3 | Random Forest (Smile 3.1.1, `smile-core`) |
 | UI framework | JavaFX (bundled with QuPath) |
 | Serialisation | JSON (Gson, bundled with QuPath) |
 
@@ -134,7 +134,7 @@ The shadow ("fat") JAR bundles the following third-party libraries; their licens
 | Library | License | Used for |
 |---------|---------|----------|
 | [QuPath](https://qupath.github.io/) | GPL-3.0 | Host platform the extension runs in |
-| [Smile](https://github.com/haifengl/smile) (`smile-core`) | Dual: **GPL-3.0 / commercial** (© Haifeng Li / SMILE.AI, LLC) | PCA, UMAP, k-means for the cell scatter plot & clustering |
+| [Smile](https://github.com/haifengl/smile) (`smile-core`) | Dual: **GPL-3.0 / commercial** (© Haifeng Li / SMILE.AI, LLC) | Random Forest model; PCA, UMAP, k-means for the cell scatter plot & clustering |
 | [XGBoost4J](https://github.com/dmlc/xgboost) | Apache-2.0 | Gradient-boosted model 1 |
 | [LightGBM4J](https://github.com/metarank/lightgbm4j) wrapping [LightGBM](https://github.com/microsoft/LightGBM) | MIT / MIT | Gradient-boosted model 2 |
 | [Bytedeco JavaCPP presets](https://github.com/bytedeco/javacpp-presets) → native [OpenBLAS](https://github.com/OpenMathLib/OpenBLAS), [ARPACK-NG](https://github.com/opencollab/arpack-ng) | Apache-2.0 / BSD-3-Clause / BSD-3-Clause | Native BLAS/LAPACK for Smile's PCA/UMAP (pulled in transitively by Smile) |
