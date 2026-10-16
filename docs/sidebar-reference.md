@@ -14,7 +14,7 @@
 | **Auto-tune hyperparameters** | ❌ | Searches for better model settings. Cost = 2 × Trials × CV folds model fits (200 at the defaults). This can take several hours on a panel with many features. |
 | **Trials** | 20 | Settings combinations tried per model (5–100). Shown only when Auto-tune is ticked. |
 | **CV folds** | 5 | Cross-validation folds used to score each combination (2–10). Shown only when Auto-tune is ticked. |
-| **Early stopping** | ✅ | Stops adding rounds when the score on held-out cells has not improved for 20 rounds. |
+| **Early stopping** | ✅ | Stops adding rounds when the class-weighted log-loss on held-out training cells has not improved for 20 rounds. Below 2,000 labelled cells the held-out cells are 5 cross-validation folds of the training 80%; above, a 10% inner split. The 20% validation set is never used. |
 | **Train/val metrics** | ✅ | Produces the **Training Metrics** report. Adds about a third to training time. Untick to train faster without the report. |
 | **Show top 10 feature importance after training** | ✅ | Opens the SHAP feature-importance plot after training. |
 | **Auto-prune features (drop near-constant & redundant)** | ✅ | Before training, removes features that are almost constant or highly correlated with another feature of the same marker. The 5 highest-variance features of each marker are always kept. Runs only when more than 20 features are selected. Image measurements are not changed. See §[4.1](setup.md#41-select-features). |

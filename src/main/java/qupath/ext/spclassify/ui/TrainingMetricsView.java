@@ -161,7 +161,17 @@ public class TrainingMetricsView {
             sb.append("Retrain to show the total labelled-cell count.\n\n");
         }
         sb.append("Held-out validation metrics from an 80/20 stratified split on labelled\n");
-        sb.append("data. These are the honest, generalisation-quality F1 numbers.\n");
+        sb.append("cells. Cells from the same image can be in both sets, so expect lower\n");
+        sb.append("scores on new images. Macro F1 averages the classes present in the set.\n");
+        String roundSelection = m1Val != null ? m1Val.roundSelection() : null;
+        if (roundSelection != null) {
+            sb.append(wrap(roundSelection, 72));
+        } else if (m1Val != null) {
+            sb.append(wrap(
+                    "Saved by an earlier version, which chose the number of boosting rounds on these"
+                            + " validation cells, so these numbers can be slightly optimistic. Retrain to update.",
+                    72));
+        }
         if (includeTrain) {
             sb.append("\n80% training-set rows are also shown \u2014 a big gap between train F1\n");
             sb.append("and validation F1 indicates over-fitting.\n");
@@ -172,6 +182,22 @@ public class TrainingMetricsView {
         }
         sb.append('\n');
         return sb.toString();
+    }
+
+    /** Word-wrap {@code text} to lines of at most {@code width} characters, each ending in a newline. */
+    static String wrap(String text, int width) {
+        StringBuilder out = new StringBuilder();
+        StringBuilder line = new StringBuilder();
+        for (String word : text.split(" ")) {
+            if (line.length() > 0 && line.length() + 1 + word.length() > width) {
+                out.append(line).append('\n');
+                line.setLength(0);
+            }
+            if (line.length() > 0) line.append(' ');
+            line.append(word);
+        }
+        if (line.length() > 0) out.append(line).append('\n');
+        return out.toString();
     }
 
     private static void appendBlock(StringBuilder sb, TrainingMetrics m) {

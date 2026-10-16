@@ -325,6 +325,115 @@ public class LightGBMModel {
     }
 
     /** Compute mean log-loss from raw LightGBM predictions. */
+    /**
+     * Choose the round count over one or more folds in lockstep (see
+     * {@link XGBoostModel#cvBestRounds}). Each fold's validation set carries the class-balancing
+     * weights, which LightGBM's native multi-logloss honours; if native scoring fails for a fold,
+     * that fold falls back to the same weighted log-loss computed here and stays on it.
+     *
+     * @return the round count with the lowest mean validation loss (1-indexed)
+     */
+    static int cvBestRounds(
+            List<RoundSelector.Fold> folds,
+            int nFeatures,
+            int nClasses,
+            int maxRounds,
+            int maxDepth,
+            float learningRate,
+            float subsample,
+            int patience,
+            Consumer<String> log)
+            throws Exception {
+        int k = folds.size();
+        LGBMDataset[] trainSets = new LGBMDataset[k];
+        LGBMDataset[] valSets = new LGBMDataset[k];
+        LGBMBooster[] boosters = new LGBMBooster[k];
+        int[] metricIdx = new int[k];
+        try {
+            String params = buildParams(nClasses, maxDepth, learningRate, subsample);
+            for (int f = 0; f < k; f++) {
+                var fold = folds.get(f);
+                trainSets[f] = LGBMDataset.createFromMat(fold.trainData(), fold.trainSize(), nFeatures, true, "", null);
+                trainSets[f].setField("label", fold.trainLabels());
+                boosters[f] = LGBMBooster.create(trainSets[f], params);
+                metricIdx[f] = -1;
+                try {
+                    // The training set must be the reference so the bin mappers match.
+                    valSets[f] = LGBMDataset.createFromMat(
+                            fold.valData(), fold.valSize(), nFeatures, true, "", trainSets[f]);
+                    valSets[f].setField("label", fold.valLabels());
+                    valSets[f].setField("weight", fold.valWeights());
+                    boosters[f].addValidData(valSets[f]);
+                    metricIdx[f] = resolveMetricIndex(boosters[f].getEvalNames(), nClasses);
+                } catch (Exception ex) {
+                    logger.info(
+                            "LightGBM native validation metric unavailable ({}); scoring manually", ex.getMessage());
+                }
+            }
+
+            double bestLoss = Double.MAX_VALUE;
+            int bestRound = 0;
+            for (int round = 0; round < maxRounds; round++) {
+                double sum = 0;
+                for (int f = 0; f < k; f++) {
+                    boosters[f].updateOneIter(); // is_finished deliberately ignored — see train()
+                    double loss = Double.NaN;
+                    if (metricIdx[f] >= 0) {
+                        try {
+                            double[] evals = boosters[f].getEval(1);
+                            loss = metricIdx[f] < evals.length ? evals[metricIdx[f]] : Double.NaN;
+                        } catch (Exception ex) {
+                            loss = Double.NaN;
+                        }
+                        if (!Double.isFinite(loss)) metricIdx[f] = -1; // one-way latch, as in findBestRounds
+                    }
+                    if (metricIdx[f] < 0) {
+                        var fold = folds.get(f);
+                        double[] preds = boosters[f].predictForMat(
+                                fold.valData(), fold.valSize(), nFeatures, true, PredictionType.C_API_PREDICT_NORMAL);
+                        loss = computeLogloss(preds, fold.valLabels(), fold.valWeights(), fold.valSize(), nClasses);
+                    }
+                    sum += loss;
+                }
+                double loss = sum / k;
+                if (loss < bestLoss) {
+                    bestLoss = loss;
+                    bestRound = round;
+                }
+                if (round - bestRound >= patience) break;
+            }
+
+            int actualRounds = bestRound + 1;
+            log.accept(String.format(
+                    "LightGBM early stopping: best round %d/%d (mean weighted val loss over %d fold%s: %.6f)",
+                    actualRounds, maxRounds, k, k == 1 ? "" : "s", bestLoss));
+            return actualRounds;
+        } finally {
+            for (int f = 0; f < k; f++) {
+                try {
+                    if (boosters[f] != null) boosters[f].close();
+                    if (valSets[f] != null) valSets[f].close();
+                    if (trainSets[f] != null) trainSets[f].close();
+                } catch (Exception ignore) {
+                }
+            }
+        }
+    }
+
+    /** Weighted mean log-loss: {@code sum(w·loss) / sum(w)}. */
+    private static double computeLogloss(double[] preds, float[] labels, float[] weights, int n, int nClasses) {
+        double loss = 0, wsum = 0;
+        for (int i = 0; i < n; i++) {
+            int trueClass = (int) labels[i];
+            double p = (nClasses == 2 && preds.length == n)
+                    ? (trueClass == 1 ? preds[i] : 1 - preds[i])
+                    : preds[i * nClasses + trueClass];
+            loss += weights[i] * -Math.log(Math.max(p, 1e-15));
+            wsum += weights[i];
+        }
+        return loss / wsum;
+    }
+
     private static double computeLogloss(double[] preds, float[] labels, int n, int nClasses) {
         double loss = 0;
         if (nClasses == 2 && preds.length == n) {

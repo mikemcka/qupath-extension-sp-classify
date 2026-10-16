@@ -239,4 +239,45 @@ class TrainingMetricsTest {
         assertEquals(0, loaded.realCount(), "older saved state has no realCount; 0 means unknown");
         assertEquals(2, loaded.total());
     }
+
+    // ── macro F1 over present classes; round-selection note ──────────────────
+
+    @Test
+    void macroF1LeavesOutClassesAbsentFromTruthAndPredictions() {
+        // Class C has no cells and is never predicted: left out. A and B perfect.
+        var m = TrainingMetrics.compute(
+                "t", List.of("A", "B", "C"), new float[] {0f, 1f}, new float[][] {{1f, 0f, 0f}, {0f, 1f, 0f}});
+        assertEquals(1.0, m.macroF1(), DELTA);
+        assertTrue(m.isAbsent(2));
+        assertTrue(m.toFormattedReport().contains("not in this set"));
+    }
+
+    @Test
+    void predictedButAbsentClassCountsAsZero() {
+        // Class C has no true cells but one false prediction: included with F1 = 0, as scikit-learn.
+        var m = TrainingMetrics.compute("t", List.of("A", "B", "C"), new float[] {0f, 1f, 1f}, new float[][] {
+            {1f, 0f, 0f}, {0f, 1f, 0f}, {0f, 0f, 1f}
+        });
+        assertFalse(m.isAbsent(2));
+        assertEquals((1.0 + 2.0 / 3.0 + 0.0) / 3, m.macroF1(), DELTA);
+    }
+
+    @Test
+    void roundSelectionNoteIsCarriedAndOldJsonLoadsWithout() {
+        var m = TrainingMetrics.compute(
+                        "t", List.of("A", "B"), new float[] {0f, 1f}, new float[][] {{1f, 0f}, {0f, 1f}})
+                .withRoundSelection("chosen by CV");
+        assertEquals("chosen by CV", m.roundSelection());
+
+        var gson = new com.google.gson.Gson();
+        var json = gson.toJsonTree(m).getAsJsonObject();
+        json.remove("roundSelection");
+        assertNull(gson.fromJson(json, TrainingMetrics.class).roundSelection());
+    }
+
+    @Test
+    void smallClassesListsOnlyClassesUnderSix() {
+        assertEquals("B (1), C (5)", ResamplingStrategy.smallClasses(java.util.Map.of("A", 6, "B", 1, "C", 5)));
+        assertEquals("", ResamplingStrategy.smallClasses(java.util.Map.of("A", 10)));
+    }
 }

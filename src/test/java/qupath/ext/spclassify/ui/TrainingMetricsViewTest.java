@@ -55,4 +55,20 @@ class TrainingMetricsViewTest {
         assertTrue(header.contains("Validation set: 669 labelled cells."), header);
         assertFalse(header.contains("Training data used"), header);
     }
+
+    @Test
+    void headerShowsHowTheRoundCountWasChosen() {
+        String header = TrainingMetricsView.header(
+                metrics(80, 80),
+                metrics(20, 20).withRoundSelection("Round count chosen by 5-fold cross-validation."),
+                false);
+        assertTrue(header.contains("Round count chosen by 5-fold cross-validation."), header);
+        assertFalse(header.contains("earlier version"), header);
+    }
+
+    @Test
+    void headerFlagsMetricsFromEarlierVersions() {
+        String header = TrainingMetricsView.header(metrics(80, 80), metrics(20, 20), false);
+        assertTrue(header.contains("earlier version"), header);
+    }
 }

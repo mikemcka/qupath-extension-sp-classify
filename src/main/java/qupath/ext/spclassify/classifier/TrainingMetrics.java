@@ -17,7 +17,9 @@ import java.util.List;
  * @param f1            per-class F1 (length nClasses)
  * @param support       per-class support — number of true samples (length nClasses)
  * @param accuracy      overall fraction correct
- * @param macroF1       unweighted mean of per-class F1
+ * @param macroF1       unweighted mean of per-class F1 over the classes present in the true labels
+ *                       or the predictions (scikit-learn's behaviour); a class with neither is
+ *                       left out rather than counted as F1 = 0
  * @param weightedF1    support-weighted mean of per-class F1
  * @param total         total number of evaluated samples
  * @param confusionMatrix square matrix [nClasses][nClasses] where
@@ -28,6 +30,8 @@ import java.util.List;
  * @param realCount     number of real labelled cells in the fold before resampling. Equals
  *                       {@code total} for a fold that was not resampled. 0 means unknown
  *                       (metrics saved by a version before this field existed).
+ * @param roundSelection how the boosting round count was chosen, shown with validation metrics;
+ *                       null for metrics saved by a version before this was recorded
  */
 public record TrainingMetrics(
         String label,
@@ -41,7 +45,8 @@ public record TrainingMetrics(
         double weightedF1,
         int total,
         int[][] confusionMatrix,
-        int realCount) {
+        int realCount,
+        String roundSelection) {
 
     /**
      * Compute per-class metrics from raw probabilities.
@@ -92,6 +97,7 @@ public record TrainingMetrics(
 
         double weightedF1Sum = 0;
         double macroF1Sum = 0;
+        int classesPresent = 0;
 
         for (int c = 0; c < nClasses; c++) {
             int tp = cm[c][c];
@@ -104,12 +110,15 @@ public record TrainingMetrics(
             precision[c] = colSum > 0 ? (double) tp / colSum : 0;
             recall[c] = rowSum > 0 ? (double) tp / rowSum : 0;
             f1[c] = (precision[c] + recall[c]) > 0 ? 2.0 * precision[c] * recall[c] / (precision[c] + recall[c]) : 0;
-            macroF1Sum += f1[c];
+            if (rowSum > 0 || colSum > 0) {
+                macroF1Sum += f1[c];
+                classesPresent++;
+            }
             weightedF1Sum += f1[c] * support[c];
         }
 
         double accuracy = n > 0 ? (double) correct / n : 0;
-        double macroF1 = nClasses > 0 ? macroF1Sum / nClasses : 0;
+        double macroF1 = classesPresent > 0 ? macroF1Sum / classesPresent : 0;
         double weightedF1 = n > 0 ? weightedF1Sum / n : 0;
 
         return new TrainingMetrics(
@@ -124,7 +133,34 @@ public record TrainingMetrics(
                 weightedF1,
                 n,
                 cm,
-                realCount);
+                realCount,
+                null);
+    }
+
+    /** A copy carrying {@code roundSelection}. */
+    public TrainingMetrics withRoundSelection(String roundSelection) {
+        return new TrainingMetrics(
+                label,
+                classNames,
+                precision,
+                recall,
+                f1,
+                support,
+                accuracy,
+                macroF1,
+                weightedF1,
+                total,
+                confusionMatrix,
+                realCount,
+                roundSelection);
+    }
+
+    /** True if the class has no true cells and no predictions in this set (left out of macro F1). */
+    public boolean isAbsent(int c) {
+        if (support[c] > 0) return false;
+        if (confusionMatrix == null) return true;
+        for (int[] row : confusionMatrix) if (row[c] > 0) return false;
+        return true;
     }
 
     /**
@@ -136,6 +172,10 @@ public record TrainingMetrics(
         sb.append(String.format("%-24s %10s %10s %10s %10s%n", "class", "precision", "recall", "f1", "support"));
         sb.append("-".repeat(68)).append('\n');
         for (int c = 0; c < classNames.size(); c++) {
+            if (isAbsent(c)) {
+                sb.append(String.format("%-24s %43s%n", truncate(classNames.get(c), 24), "not in this set"));
+                continue;
+            }
             sb.append(String.format(
                     "%-24s %10.3f %10.3f %10.3f %10d%n",
                     truncate(classNames.get(c), 24), precision[c], recall[c], f1[c], support[c]));
