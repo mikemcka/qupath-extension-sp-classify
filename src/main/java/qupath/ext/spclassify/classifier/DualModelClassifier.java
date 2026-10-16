@@ -395,6 +395,16 @@ public class DualModelClassifier {
         }
 
         out.accept("Training data: " + nSamples + " cells, " + nFeatures + " features, " + nClasses + " classes");
+        if (resampling != null && resampling.usesNeighbours()) {
+            Map<String, Integer> perClass = new LinkedHashMap<>();
+            for (int label : trainLabels) perClass.merge(classNames.get(label), 1, Integer::sum);
+            String small = ResamplingStrategy.smallClasses(perClass);
+            if (!small.isEmpty()) {
+                out.accept("WARN: fewer than " + ResamplingStrategy.MIN_CELLS_FOR_NEIGHBOURS + " labelled cells: "
+                        + small + ". " + resampling + " oversamples these from fewer neighbours, so their"
+                        + " synthetic cells are near-copies. Label more cells of these classes.");
+            }
+        }
         out.accept("Threads: " + TrainingThreads.total() + " (of "
                 + Runtime.getRuntime().availableProcessors() + " available processors)");
 
@@ -431,20 +441,17 @@ public class DualModelClassifier {
         boolean mdl1Boosted = model1Type != ModelType.RANDOM_FOREST;
         boolean mdl2Boosted = model2Type != ModelType.RANDOM_FOREST;
 
-        // The 80/20 fold built for early stopping is byte-identical to the one the train/val
-        // metrics step needs — same rows, same ratio, same seed, same resampling strategy — so it
-        // is built at most once per run and shared. Stays null when early stopping is off, in
-        // which case the metrics step builds its own.
+        // The 80/20 split built here is the one the train/val metrics step reports on — same rows,
+        // ratio, seed and resampling — so it is built at most once per run and shared. Stays null
+        // when early stopping is off, in which case the metrics step builds its own.
         TrainValMetricsComputer.PreparedFold sharedFold = null;
-        // The XGBoost model as it stood at its best round, kept from the search so the metrics
-        // step does not have to rebuild the identical model on the identical fold.
-        BestModel mdl1BestModel = null;
-        BestModel mdl2BestModel = null;
+        // How the round count was chosen; shown with the validation metrics.
+        String roundSelection = earlyStop
+                ? "Fixed round count (too few labelled cells for early stopping)."
+                : "Fixed round count (early stopping off).";
 
         if (earlyStop && nRealSamples >= 20 && (mdl1Boosted || mdl2Boosted)) {
             updateStatus("Finding optimal round counts…", 0.05);
-            out.accept("Early stopping: 80/20 stratified split on real data (patience=20)…");
-
             timer.start("resample (80% fold)");
             sharedFold = TrainValMetricsComputer.prepare(
                     trainRows, trainLabels, nRealSamples, nClasses, nFeatures, strategy, out);
@@ -452,105 +459,34 @@ public class DualModelClassifier {
 
         if (sharedFold != null) {
             int patience = 20;
-            int[][] split = sharedFold.split();
-            float[] esTrainData = sharedFold.trainData();
-            float[] esTrainLabels = sharedFold.trainLabels();
-            int esTrainSize = sharedFold.trainSize();
-            float[] esValData = sharedFold.valData();
-            float[] esValLabels = sharedFold.valLabels();
+            // Early stopping watches folds taken from the training 80% only, so the reported 20%
+            // never influences the round count (the scikit-learn / xgboost.cv arrangement). Few
+            // labels: 5-fold CV over the 80%, so every training cell helps choose. Many: one inner
+            // split. Validation cells are class-weighted so small classes count as much as large.
+            timer.start("early stop: folds");
+            var plan = RoundSelector.plan(
+                    trainRows, trainLabels, sharedFold.split()[0], nRealSamples, nClasses, nFeatures, strategy);
+            out.accept("Early stopping: " + plan.description());
+            roundSelection = plan.description();
 
-            if (strategy != ResamplingStrategy.NONE) {
-                out.accept("Early stopping train set after resampling: " + esTrainSize + " (validation: "
-                        + split[1].length + " real samples)");
-            }
+            if (!plan.folds().isEmpty()) {
+                timer.start("early stop: " + model1Type);
+                if (mdl1Boosted && model1Type == ModelType.XGBOOST) {
+                    mdl1Rounds = XGBoostModel.cvBestRounds(
+                            plan.folds(), nFeatures, nClasses, mdl1Rounds, mdl1Depth, mdl1Eta, mdl1Sub, patience, out);
+                } else if (mdl1Boosted && model1Type == ModelType.LIGHTGBM) {
+                    mdl1Rounds = LightGBMModel.cvBestRounds(
+                            plan.folds(), nFeatures, nClasses, mdl1Rounds, mdl1Depth, mdl1Eta, mdl1Sub, patience, out);
+                }
 
-            // Snapshot the winning model only if the metrics step is going to run: it trains on
-            // this exact fold, so the snapshot spares it a full refit. Serialising on every
-            // improvement is not free (mostly GC churn on a wide multi-class model), so it is not
-            // worth doing speculatively.
-            //
-            // Never when auto-tuning. The snapshot is taken here, with the hyperparameters as they
-            // stand *now*; auto-tune runs afterwards and replaces rounds/depth/eta/subsample
-            // wholesale. Reusing it would report metrics for a model built from the pre-tune
-            // settings while the deployed model uses the tuned ones — a silently wrong report,
-            // which is worse than the refit it saves. Not taking the snapshot also skips its cost
-            // on a run that could never use it; the matching check in BestModel is the backstop.
-            boolean keepBestModel = computeMetrics && !autoTune && nRealSamples >= 20;
-
-            timer.start("early stop: " + model1Type);
-            if (mdl1Boosted && model1Type == ModelType.XGBOOST) {
-                var search = XGBoostModel.searchRounds(
-                        esTrainData,
-                        esTrainLabels,
-                        esTrainSize,
-                        esValData,
-                        esValLabels,
-                        split[1].length,
-                        nFeatures,
-                        nClasses,
-                        mdl1Rounds,
-                        mdl1Depth,
-                        mdl1Eta,
-                        mdl1Sub,
-                        patience,
-                        keepBestModel,
-                        out);
-                mdl1Rounds = search.bestRounds();
-                mdl1BestModel = BestModel.of(search.bestModel(), mdl1Rounds, mdl1Depth, mdl1Eta, mdl1Sub, mdl1Col);
-            } else if (mdl1Boosted && model1Type == ModelType.LIGHTGBM) {
-                mdl1Rounds = LightGBMModel.findBestRounds(
-                        esTrainData,
-                        esTrainLabels,
-                        esTrainSize,
-                        esValData,
-                        esValLabels,
-                        split[1].length,
-                        nFeatures,
-                        nClasses,
-                        mdl1Rounds,
-                        mdl1Depth,
-                        mdl1Eta,
-                        mdl1Sub,
-                        patience,
-                        out);
-            }
-
-            timer.start("early stop: " + model2Type);
-            if (mdl2Boosted && model2Type == ModelType.XGBOOST) {
-                var search = XGBoostModel.searchRounds(
-                        esTrainData,
-                        esTrainLabels,
-                        esTrainSize,
-                        esValData,
-                        esValLabels,
-                        split[1].length,
-                        nFeatures,
-                        nClasses,
-                        mdl2Rounds,
-                        mdl2Depth,
-                        mdl2Eta,
-                        mdl2Sub,
-                        patience,
-                        keepBestModel,
-                        out);
-                mdl2Rounds = search.bestRounds();
-                mdl2BestModel = BestModel.of(search.bestModel(), mdl2Rounds, mdl2Depth, mdl2Eta, mdl2Sub, mdl2Col);
-            } else if (mdl2Boosted && model2Type == ModelType.LIGHTGBM) {
-                mdl2Rounds = LightGBMModel.findBestRounds(
-                        esTrainData,
-                        esTrainLabels,
-                        esTrainSize,
-                        esValData,
-                        esValLabels,
-                        split[1].length,
-                        nFeatures,
-                        nClasses,
-                        mdl2Rounds,
-                        mdl2Depth,
-                        mdl2Eta,
-                        mdl2Sub,
-                        patience,
-                        out);
+                timer.start("early stop: " + model2Type);
+                if (mdl2Boosted && model2Type == ModelType.XGBOOST) {
+                    mdl2Rounds = XGBoostModel.cvBestRounds(
+                            plan.folds(), nFeatures, nClasses, mdl2Rounds, mdl2Depth, mdl2Eta, mdl2Sub, patience, out);
+                } else if (mdl2Boosted && model2Type == ModelType.LIGHTGBM) {
+                    mdl2Rounds = LightGBMModel.cvBestRounds(
+                            plan.folds(), nFeatures, nClasses, mdl2Rounds, mdl2Depth, mdl2Eta, mdl2Sub, patience, out);
+                }
             }
         }
 
@@ -591,11 +527,25 @@ public class DualModelClassifier {
 
             // The tuner's own matrix, built from the un-balanced rows. Kept local so it and the
             // prepared folds are collectable before the full-dataset resample allocates again.
-            float[] tuneData = new float[nRealSamples * nFeatures];
-            float[] tuneLabels = new float[nRealSamples];
-            for (int i = 0; i < nRealSamples; i++) {
-                System.arraycopy(trainRows.get(i), 0, tuneData, i * nFeatures, nFeatures);
-                tuneLabels[i] = trainLabels.get(i);
+            // When metrics are reported, tune on the training 80% only (the same split the metrics
+            // step uses), so the reported 20% does not influence the chosen settings either.
+            int[] tuneIdx = null;
+            if (computeMetrics && nRealSamples >= 20) {
+                if (sharedFold != null) {
+                    tuneIdx = sharedFold.split()[0];
+                } else {
+                    int[] intLabels = new int[nRealSamples];
+                    for (int i = 0; i < nRealSamples; i++) intLabels[i] = trainLabels.get(i);
+                    tuneIdx = TrainValMetricsComputer.stratifiedSplit(intLabels, nClasses, 0.8, new Random(42))[0];
+                }
+            }
+            int nTune = tuneIdx != null ? tuneIdx.length : nRealSamples;
+            float[] tuneData = new float[nTune * nFeatures];
+            float[] tuneLabels = new float[nTune];
+            for (int i = 0; i < nTune; i++) {
+                int row = tuneIdx != null ? tuneIdx[i] : i;
+                System.arraycopy(trainRows.get(row), 0, tuneData, i * nFeatures, nFeatures);
+                tuneLabels[i] = trainLabels.get(row);
             }
 
             final int foldFeatures = nFeatures;
@@ -630,7 +580,7 @@ public class DualModelClassifier {
             var tuneResult = HyperparameterTuner.tune(
                     tuneData,
                     tuneLabels,
-                    nRealSamples,
+                    nTune,
                     nFeatures,
                     nClasses,
                     tuneTrials,
@@ -719,8 +669,8 @@ public class DualModelClassifier {
                         mdl2Col,
                         out,
                         sharedFold,
-                        mdl1BestModel,
-                        mdl2BestModel);
+                        roundSelection
+                                + (autoTune ? " Auto-tune chose the other settings using the training 80% only." : ""));
             } catch (Exception ex) {
                 logger.warn("Failed to compute training/validation metrics", ex);
                 out.accept("Note: train/val metrics computation failed: " + ex.getMessage());
@@ -1331,40 +1281,6 @@ public class DualModelClassifier {
      * themselves overwritten by the final full-data training step that runs
      * immediately after.
      */
-    /** Lazily creates the shared XGBoost model, matching {@code trainModel}'s own init. */
-    private XGBoostModel getOrCreateXgb() {
-        modelsChangedThisRun = true; // callers load into the live model (best-round restore)
-        if (xgbModel == null) xgbModel = new XGBoostModel();
-        return xgbModel;
-    }
-
-    /**
-     * A serialised booster from the round search, carrying the hyperparameters it was built with.
-     * <p>
-     * Restoring it is only sound when the metrics step would otherwise have fitted <em>exactly</em>
-     * this model, so the reuse site checks the settings rather than trusting the call order. That
-     * is not hypothetical: auto-tuning runs after the search and replaces all four values, and
-     * without this check the metrics report would describe the pre-tune model while the deployed
-     * one used the tuned settings.
-     */
-    private record BestModel(byte[] bytes, int rounds, int depth, float eta, float subsample, float colsample) {
-
-        /** @return a snapshot, or {@code null} when the search did not keep one */
-        static BestModel of(byte[] bytes, int rounds, int depth, float eta, float subsample, float colsample) {
-            return bytes == null ? null : new BestModel(bytes, rounds, depth, eta, subsample, colsample);
-        }
-
-        /**
-         * @return true if this model is the one a fit with these settings would have produced.
-         *         Every model-affecting parameter has to be in this comparison: the snapshot is
-         *         taken during early stopping, before auto-tune runs, so a search that moves any
-         *         one of them makes the cached bytes the wrong model to restore.
-         */
-        boolean matches(int r, int d, float e, float s, float c) {
-            return rounds == r && depth == d && eta == e && subsample == s && colsample == c;
-        }
-    }
-
     private void computeTrainValMetrics(
             List<float[]> realRows,
             List<Integer> realLabels,
@@ -1384,15 +1300,11 @@ public class DualModelClassifier {
             float mdl2Col,
             Consumer<String> out,
             TrainValMetricsComputer.PreparedFold cachedFold,
-            BestModel mdl1BestModel,
-            BestModel mdl2BestModel)
+            String roundSelection)
             throws Exception {
-        // The evaluation copies are trained on cachedFold.trainData() — the very array the round
-        // search consumed. When the search kept its winning model, restoring it is exactly the
-        // fit that would otherwise be redone. Both halves of "exactly" are checked: array identity
-        // for the fold, and the four hyperparameters for the model. Anything else falls back to a
-        // real fit — reporting metrics for a model that was never trained is worse than the refit.
-        float[] foldData = cachedFold != null ? cachedFold.trainData() : null;
+        // The evaluation copies are refitted on the 80%. (The round search used to hand back its
+        // best-round model to skip this fit, but it now trains on folds of the 80%, not on the 80%
+        // itself, so its model is not the one this step needs.)
         TrainValMetricsComputer.Result result = TrainValMetricsComputer.compute(
                 realRows,
                 realLabels,
@@ -1400,58 +1312,34 @@ public class DualModelClassifier {
                 nClasses,
                 nFeatures,
                 strategy,
-                (data, labels, n) -> {
-                    if (mdl1BestModel != null
-                            && model1Type == ModelType.XGBOOST
-                            && data == foldData
-                            && mdl1BestModel.matches(mdl1Rounds, mdl1Depth, mdl1Eta, mdl1Sub, mdl1Col)) {
-                        getOrCreateXgb().loadFromBytes(mdl1BestModel.bytes(), classNames, featureNames);
-                    } else {
-                        trainModel(
-                                model1Type,
-                                true,
-                                data,
-                                labels,
-                                n,
-                                nFeatures,
-                                mdl1Rounds,
-                                mdl1Depth,
-                                mdl1Eta,
-                                mdl1Sub,
-                                mdl1Col);
-                    }
-                },
+                (data, labels, n) -> trainModel(
+                        model1Type, true, data, labels, n, nFeatures, mdl1Rounds, mdl1Depth, mdl1Eta, mdl1Sub, mdl1Col),
                 (data, n) -> predictModel(model1Type, true, data, n, nFeatures),
                 "Model 1 (" + model1Type + ")",
-                (data, labels, n) -> {
-                    if (mdl2BestModel != null
-                            && model2Type == ModelType.XGBOOST
-                            && data == foldData
-                            && mdl2BestModel.matches(mdl2Rounds, mdl2Depth, mdl2Eta, mdl2Sub, mdl2Col)) {
-                        getOrCreateXgb().loadFromBytes(mdl2BestModel.bytes(), classNames, featureNames);
-                    } else {
-                        trainModel(
-                                model2Type,
-                                false,
-                                data,
-                                labels,
-                                n,
-                                nFeatures,
-                                mdl2Rounds,
-                                mdl2Depth,
-                                mdl2Eta,
-                                mdl2Sub,
-                                mdl2Col);
-                    }
-                },
+                (data, labels, n) -> trainModel(
+                        model2Type,
+                        false,
+                        data,
+                        labels,
+                        n,
+                        nFeatures,
+                        mdl2Rounds,
+                        mdl2Depth,
+                        mdl2Eta,
+                        mdl2Sub,
+                        mdl2Col),
                 (data, n) -> predictModel(model2Type, false, data, n, nFeatures),
                 "Model 2 (" + model2Type + ")",
                 classNames,
                 out,
                 cachedFold);
         this.model1TrainMetrics = result.model1Train();
-        this.model1ValMetrics = result.model1Val();
+        this.model1ValMetrics = withNote(result.model1Val(), roundSelection);
         this.model2TrainMetrics = result.model2Train();
-        this.model2ValMetrics = result.model2Val();
+        this.model2ValMetrics = withNote(result.model2Val(), roundSelection);
+    }
+
+    private static TrainingMetrics withNote(TrainingMetrics m, String roundSelection) {
+        return m == null ? null : m.withRoundSelection(roundSelection);
     }
 }

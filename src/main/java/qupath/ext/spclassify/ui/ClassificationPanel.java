@@ -728,6 +728,39 @@ public class ClassificationPanel extends VBox {
             return;
         }
 
+        // SMOTE/ADASYN interpolate from a class's 5 nearest same-class cells. With fewer than 6
+        // labelled cells they fall back to fewer neighbours, so the synthetic cells are near-copies.
+        ResamplingStrategy plannedStrategy = getEffectiveResamplingStrategy();
+        if (plannedStrategy.usesNeighbours()) {
+            Map<String, Integer> classCounts = new LinkedHashMap<>();
+            for (String v : labelStore.getAllLabels().values()) {
+                classCounts.merge(LabelStore.effectiveClassName(v), 1, Integer::sum);
+            }
+            if (poolingOn && project != null) {
+                TrainingOrchestrator.countLabelsByClassOnOtherImages(
+                                project, imageData, activeBinaryMarker, validClasses.isEmpty() ? null : validClasses)
+                        .forEach((cls, n) -> classCounts.merge(cls, n, Integer::sum));
+            }
+            if (importedTrainingRows != null) {
+                for (var row : importedTrainingRows) {
+                    if (row != null && row.label() != null && !row.label().isBlank()) {
+                        classCounts.merge(LabelStore.effectiveClassName(row.label()), 1, Integer::sum);
+                    }
+                }
+            }
+            String small = ResamplingStrategy.smallClasses(classCounts);
+            if (!small.isEmpty()
+                    && !Dialogs.showConfirmDialog(
+                            STRINGS.getString("name"),
+                            "These classes have fewer than " + ResamplingStrategy.MIN_CELLS_FOR_NEIGHBOURS
+                                    + " labelled cells: " + small + ".\n\n" + plannedStrategy
+                                    + " makes synthetic cells from each class's 5 nearest labelled cells. For these"
+                                    + " classes it has fewer to use, so the synthetic cells are near-copies, and"
+                                    + " their validation scores rest on 1 or 2 cells.\n\nTrain anyway?")) {
+                return;
+            }
+        }
+
         // ── Restrict to features shared with imported data ─────────────────
         // When the user has imported ground-truth rows from another project the
         // imported rows only carry values for that project's panel. Aligning to

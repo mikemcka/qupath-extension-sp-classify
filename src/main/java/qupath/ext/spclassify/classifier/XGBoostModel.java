@@ -249,6 +249,80 @@ public class XGBoostModel {
         }
     }
 
+    /**
+     * Choose the round count over one or more folds in lockstep, as {@code xgboost.cv} does: every
+     * round, each fold's booster adds one round and is scored on its own validation part (weighted
+     * by {@link RoundSelector.Fold#valWeights()}, which XGBoost's {@code mlogloss} honours). The
+     * search stops when the mean loss across folds has not improved for {@code patience} rounds.
+     *
+     * @return the round count with the lowest mean validation loss (1-indexed)
+     */
+    static int cvBestRounds(
+            List<RoundSelector.Fold> folds,
+            int nFeatures,
+            int nClasses,
+            int maxRounds,
+            int maxDepth,
+            float eta,
+            float subsample,
+            int patience,
+            Consumer<String> log)
+            throws Exception {
+        int k = folds.size();
+        DMatrix[] trainMats = new DMatrix[k];
+        DMatrix[] valMats = new DMatrix[k];
+        Booster[] boosters = new Booster[k];
+        try {
+            Map<String, Object> params = buildParams(nClasses, maxDepth, eta, subsample);
+            params.put("verbosity", 0);
+            for (int f = 0; f < k; f++) {
+                var fold = folds.get(f);
+                trainMats[f] = new DMatrix(fold.trainData(), fold.trainSize(), nFeatures, Float.NaN);
+                trainMats[f].setLabel(fold.trainLabels());
+                valMats[f] = new DMatrix(fold.valData(), fold.valSize(), nFeatures, Float.NaN);
+                valMats[f].setLabel(fold.valLabels());
+                valMats[f].setWeight(fold.valWeights());
+                boosters[f] = XGBoost.train(trainMats[f], params, 1, new LinkedHashMap<>(), null, null);
+            }
+
+            double bestLoss = meanLoss(boosters, valMats, 0);
+            int bestRound = 0;
+            for (int round = 1; round < maxRounds; round++) {
+                for (int f = 0; f < k; f++) boosters[f].update(trainMats[f], round);
+                double loss = meanLoss(boosters, valMats, round);
+                if (loss < bestLoss) {
+                    bestLoss = loss;
+                    bestRound = round;
+                }
+                if (round - bestRound >= patience) break;
+            }
+
+            int actualRounds = bestRound + 1;
+            log.accept(String.format(
+                    "XGBoost early stopping: best round %d/%d (mean weighted val loss over %d fold%s: %.6f)",
+                    actualRounds, maxRounds, k, k == 1 ? "" : "s", bestLoss));
+            return actualRounds;
+        } finally {
+            for (int f = 0; f < k; f++) {
+                try {
+                    if (boosters[f] != null) boosters[f].dispose();
+                    if (trainMats[f] != null) trainMats[f].dispose();
+                    if (valMats[f] != null) valMats[f].dispose();
+                } catch (Exception ignore) {
+                }
+            }
+        }
+    }
+
+    private static double meanLoss(Booster[] boosters, DMatrix[] valMats, int round) throws XGBoostError {
+        double sum = 0;
+        for (int f = 0; f < boosters.length; f++) {
+            String evalStr = boosters[f].evalSet(new DMatrix[] {valMats[f]}, new String[] {"val"}, round);
+            sum += parseEvalMetric(evalStr);
+        }
+        return sum / boosters.length;
+    }
+
     /** Parse the last metric value from an XGBoost evalSet string. */
     private static double parseEvalMetric(String evalStr) {
         int lastColon = evalStr.lastIndexOf(':');

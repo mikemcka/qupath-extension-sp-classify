@@ -169,8 +169,22 @@ final class TrainingOrchestrator {
             ImageData<BufferedImage> currentImageData,
             String scope,
             Set<String> allowedClasses) {
-        var currentEntry = project.getEntry(currentImageData);
         int count = 0;
+        for (int n : countLabelsByClassOnOtherImages(project, currentImageData, scope, allowedClasses)
+                .values()) {
+            count += n;
+        }
+        return count;
+    }
+
+    /** As {@link #countLabelsOnOtherImages}, per effective class. */
+    static Map<String, Integer> countLabelsByClassOnOtherImages(
+            Project<BufferedImage> project,
+            ImageData<BufferedImage> currentImageData,
+            String scope,
+            Set<String> allowedClasses) {
+        var currentEntry = project.getEntry(currentImageData);
+        Map<String, Integer> counts = new LinkedHashMap<>();
         for (var entry : project.getImageList()) {
             if (currentEntry != null && entry.equals(currentEntry)) continue;
             if (!ProjectStateManager.hasImageLabels(project, scope, entry.getImageName())) continue;
@@ -178,15 +192,14 @@ final class TrainingOrchestrator {
                 LabelStore saved = ProjectStateManager.loadImageLabels(project, scope, entry.getImageName());
                 if (saved == null) continue;
                 for (String value : saved.getAllLabels().values()) {
-                    if (allowedClasses == null || allowedClasses.contains(LabelStore.effectiveClassName(value))) {
-                        count++;
-                    }
+                    String cls = LabelStore.effectiveClassName(value);
+                    if (allowedClasses == null || allowedClasses.contains(cls)) counts.merge(cls, 1, Integer::sum);
                 }
             } catch (Exception ex) {
                 // Unreadable label file: not counted; pooling reports it when training runs.
             }
         }
-        return count;
+        return counts;
     }
 
     /**

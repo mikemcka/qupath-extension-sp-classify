@@ -724,7 +724,7 @@ public final class HyperparameterTuner {
 
     // ── Stratified k-fold ───────────────────────────────────────────────────
 
-    private static List<int[][]> stratifiedKFold(int[] labels, int nClasses, int k, Random rng) {
+    static List<int[][]> stratifiedKFold(int[] labels, int nClasses, int k, Random rng) {
         List<List<Integer>> classGroups = new ArrayList<>();
         for (int c = 0; c < nClasses; c++) classGroups.add(new ArrayList<>());
         for (int i = 0; i < labels.length; i++) classGroups.get(labels[i]).add(i);
@@ -955,9 +955,11 @@ public final class HyperparameterTuner {
         int counted = 0;
         for (int c = 0; c < nClasses; c++) {
             int support = tp[c] + fn[c];
-            if (support == 0) continue;
+            // As scikit-learn: average over classes in the truth or the predictions, so false
+            // positives into a class absent from this fold still count (as F1 = 0).
+            if (support == 0 && fp[c] == 0) continue;
             double precision = (tp[c] + fp[c]) > 0 ? (double) tp[c] / (tp[c] + fp[c]) : 0;
-            double recall = (double) tp[c] / (tp[c] + fn[c]);
+            double recall = support > 0 ? (double) tp[c] / support : 0;
             double f1 = (precision + recall) > 0 ? 2 * precision * recall / (precision + recall) : 0;
             sumF1 += f1;
             counted++;

@@ -79,7 +79,7 @@ Use `SMOTE` alone if Tomek links removes too many labelled cells (the training l
 
 **Rounds / Max depth.** The defaults are 500 rounds (range 50–1000) and depth 6 (range 2–15).
 
-- With **Early stopping** ticked (the default), Rounds is a maximum. Each model stops adding rounds when it stops improving.
+- With **Early stopping** ticked (the default), Rounds is a maximum. Each model stops adding rounds when it stops improving on held-out cells from the training 80% (5-fold cross-validation below 2,000 labelled cells, a 10% inner split above). The 20% validation set used for **Training Metrics** is not used to choose rounds.
 - With **Early stopping** unticked, every round is trained. Lower Rounds to reduce training time.
 
 The training log shows the rounds each model used, e.g. `XGBoost early stopping: best round 127/500`. If the number is close to the maximum, raise **Rounds**.
@@ -147,6 +147,11 @@ weighted F1                           0.903       500
 Tick **Show 80% training-set rows (for over-fit diagnosis)** to also show the scores on the training cells.
 
 The line above the tables gives the number of labelled cells in the 80% and 20% sets. When balancing is on, it also gives the number of rows in the 80% set after balancing; the training-set scores are computed on those rows, including the synthetic ones. The 20% set is never balanced.
+
+- **Macro F1** is the mean F1 over the classes that have cells in the set or are predicted in it. A class with neither is shown as `not in this set` and left out of the mean.
+- **How the round count was chosen** is shown above the tables. With early stopping on it was chosen on cells from the 80% only, so the 20% has not influenced the model. Metrics saved by an earlier version say so: those versions chose rounds on the 20%, so their scores can be slightly optimistic.
+- **New images:** the 20% is drawn from the same images as the 80%, often from neighbouring cells. Expect lower scores on images with no labels.
+- **Small classes:** with SMOTE or ADASYN, classes with fewer than 6 labelled cells get a warning before training. Their synthetic cells are near-copies of the few labelled ones, and their validation scores rest on 1 or 2 cells.
 
 ![Training metrics](doc_images/training_metrics.png)
 
