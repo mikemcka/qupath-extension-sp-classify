@@ -5,6 +5,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
@@ -126,6 +127,39 @@ final class TrainingOrchestrator {
         }
         trainLog.accept("Pooled total: " + supplementaryRows.size() + " rows.");
         return new PooledLabels(supplementaryRows, supplementaryLabels);
+    }
+
+    /**
+     * Count the saved labels on every project image except the open one, from the per-image
+     * label files only (no image data is read). Used to decide whether pooled training has
+     * enough labels before starting.
+     *
+     * @param scope          per-image label scope (binary marker, or null = multi-class)
+     * @param allowedClasses classes to count, matched on the effective (post-merge) class; null counts all
+     */
+    static int countLabelsOnOtherImages(
+            Project<BufferedImage> project,
+            ImageData<BufferedImage> currentImageData,
+            String scope,
+            Set<String> allowedClasses) {
+        var currentEntry = project.getEntry(currentImageData);
+        int count = 0;
+        for (var entry : project.getImageList()) {
+            if (currentEntry != null && entry.equals(currentEntry)) continue;
+            if (!ProjectStateManager.hasImageLabels(project, scope, entry.getImageName())) continue;
+            try {
+                LabelStore saved = ProjectStateManager.loadImageLabels(project, scope, entry.getImageName());
+                if (saved == null) continue;
+                for (String value : saved.getAllLabels().values()) {
+                    if (allowedClasses == null || allowedClasses.contains(LabelStore.effectiveClassName(value))) {
+                        count++;
+                    }
+                }
+            } catch (Exception ex) {
+                // Unreadable label file: not counted; pooling reports it when training runs.
+            }
+        }
+        return count;
     }
 
     /**

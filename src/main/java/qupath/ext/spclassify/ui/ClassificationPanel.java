@@ -667,12 +667,25 @@ public class ClassificationPanel extends VBox {
         }
 
         int totalEvidenceCount = labelStore.size() + importedEvidenceCount;
+        // With pooling on, labels saved on other images are trained on too, so they count
+        // towards the minimum. Only label files are read here, not image data.
+        boolean poolingOn = activeBinaryMarker != null || poolImagesCheckBox.isSelected();
+        int otherImageLabelCount = 0;
+        if (totalEvidenceCount < 10 && poolingOn && project != null && imageData != null) {
+            otherImageLabelCount = TrainingOrchestrator.countLabelsOnOtherImages(
+                    project, imageData, activeBinaryMarker, validClasses.isEmpty() ? null : validClasses);
+            totalEvidenceCount += otherImageLabelCount;
+        }
         if (totalEvidenceCount < 10) {
             Dialogs.showErrorMessage(
                     STRINGS.getString("name"),
                     "Need at least 10 labelled cells to train. Found: " + totalEvidenceCount
-                            + " (local labels=" + labelStore.size() + ", imported rows=" + importedEvidenceCount + ")"
-                            + "\nUse point annotations or import training rows to label cells.");
+                            + " (this image=" + labelStore.size() + ", other images=" + otherImageLabelCount
+                            + ", imported rows=" + importedEvidenceCount + ")"
+                            + "\nUse point annotations or import training rows to label cells."
+                            + (poolingOn
+                                    ? ""
+                                    : "\nTick \"Pool labels from all images\" to use labels on other images."));
             return;
         }
 
