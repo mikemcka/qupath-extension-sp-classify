@@ -237,7 +237,7 @@ Type a class name and click **Add Class**. This adds the class to QuPath's class
 
 #### Merge tab
 - Select one or more source classes (Ctrl/Cmd+click), then type a target name or pick one from **Existing:**.
-- **Merge Selected → Target** renames every matching label in all images. The original name is kept in the saved label: `test1` merged into `myType` is saved as `test1-mergedInto(myType)`. Training uses the target class (`myType`). Undo it from the **Undo Merge** tab.
+- **Merge Selected → Target** renames every matching label in all images. The original name is kept in the saved label: `test1` merged into `myType` is saved as `test1-mergedInto(myType)`. Training uses the target class (`myType`). Undo it from the **Undo Merge** tab. Class names must match the labels exactly, including case and a trailing `*` (e.g. `ignore*`); if no saved label uses the selected classes, a warning says so and nothing is changed.
 
 #### Undo Merge tab
 - Pick a class that was a merge target. The list shows classes found in `-mergedInto(...)` labels.
