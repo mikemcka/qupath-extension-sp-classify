@@ -1,6 +1,7 @@
 package qupath.ext.spclassify.io;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -55,11 +56,11 @@ class PredictionPersistenceTest {
                         new float[] {0.2f, 0.3f, 0.5f},
                         CLASSES));
 
-        Path written = ProjectStateManager.saveImagePredictions(project, "slide A.tif", predAll);
+        Path written = ProjectStateManager.saveImagePredictions(project, null, "slide A.tif", predAll);
         assertNotNull(written);
         assertTrue(Files.exists(written));
 
-        PopulationSet loaded = ProjectStateManager.loadImagePredictions(project, "slide A.tif");
+        PopulationSet loaded = ProjectStateManager.loadImagePredictions(project, null, "slide A.tif");
         assertNotNull(loaded);
         assertEquals(2, loaded.size());
 
@@ -81,14 +82,14 @@ class PredictionPersistenceTest {
     @Test
     void emptyPredictionSetWritesNothing() throws Exception {
         Project<BufferedImage> project = fakeProject(tempDir.resolve("empty/project.qpproj"), List.of());
-        assertNull(ProjectStateManager.saveImagePredictions(project, "img", new PopulationSet("Pred_ALL")));
-        assertNull(ProjectStateManager.saveImagePredictions(project, "img", null));
+        assertNull(ProjectStateManager.saveImagePredictions(project, null, "img", new PopulationSet("Pred_ALL")));
+        assertNull(ProjectStateManager.saveImagePredictions(project, null, "img", null));
     }
 
     @Test
     void loadReturnsNullWhenNoFile() throws Exception {
         Project<BufferedImage> project = fakeProject(tempDir.resolve("none/project.qpproj"), List.of());
-        assertNull(ProjectStateManager.loadImagePredictions(project, "never-saved"));
+        assertNull(ProjectStateManager.loadImagePredictions(project, null, "never-saved"));
     }
 
     @Test
@@ -106,10 +107,51 @@ class PredictionPersistenceTest {
                         new float[] {0.8f, 0.1f, 0.1f},
                         new float[] {0.7f, 0.2f, 0.1f},
                         CLASSES));
-        ProjectStateManager.saveImagePredictions(project, "with-preds.tif", predAll);
+        ProjectStateManager.saveImagePredictions(project, null, "with-preds.tif", predAll);
 
-        List<String> imagesWithPreds = ProjectStateManager.listImagesWithPredictions(project);
+        List<String> imagesWithPreds = ProjectStateManager.listImagesWithPredictions(project, null);
         assertEquals(List.of("with-preds.tif"), imagesWithPreds);
+    }
+
+    @Test
+    void binaryAndMultiClassPredictionsAreStoredSeparately() throws Exception {
+        Project<BufferedImage> project = fakeProject(tempDir.resolve("scope/project.qpproj"), List.of("img.tif"));
+        List<String> binary = List.of("CD3+", "CD3-");
+        PopulationSet multi = single("cell-1", "Tumour", new float[] {0.8f, 0.1f, 0.1f}, CLASSES);
+        PopulationSet cd3 = single("cell-1", "CD3+", new float[] {0.9f, 0.1f}, binary);
+
+        ProjectStateManager.saveImagePredictions(project, null, "img.tif", multi);
+        ProjectStateManager.saveImagePredictions(project, "CD3", "img.tif", cd3);
+
+        assertEquals(
+                CLASSES,
+                ProjectStateManager.loadImagePredictions(project, null, "img.tif")
+                        .get("cell-1")
+                        .getClassNames());
+        assertEquals(
+                binary,
+                ProjectStateManager.loadImagePredictions(project, "CD3", "img.tif")
+                        .get("cell-1")
+                        .getClassNames());
+        assertNull(ProjectStateManager.loadImagePredictions(project, "CD8", "img.tif"));
+        assertEquals(List.of("img.tif"), ProjectStateManager.listImagesWithPredictions(project, "CD3"));
+        assertEquals(List.of(), ProjectStateManager.listImagesWithPredictions(project, "CD8"));
+    }
+
+    @Test
+    void predictionsMatchClassesComparesClassList() {
+        PopulationSet preds = single("cell-1", "CD3+", new float[] {0.9f, 0.1f}, List.of("CD3+", "CD3-"));
+
+        assertTrue(ProjectStateManager.predictionsMatchClasses(preds, List.of("CD3+", "CD3-")));
+        assertFalse(ProjectStateManager.predictionsMatchClasses(preds, CLASSES));
+        assertTrue(ProjectStateManager.predictionsMatchClasses(preds, null), "no classifier: no check");
+        assertTrue(ProjectStateManager.predictionsMatchClasses(null, CLASSES));
+    }
+
+    private static PopulationSet single(String cellId, String label, float[] probs, List<String> classes) {
+        PopulationSet set = new PopulationSet("Pred_ALL");
+        set.put(cellId, new CellPrediction(cellId, label, label, probs, probs, classes));
+        return set;
     }
 
     private static void assertArrayEqualsExact(float[] expected, float[] actual) {

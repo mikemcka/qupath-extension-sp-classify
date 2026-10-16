@@ -176,6 +176,7 @@ public class UncertaintySampler {
 
             for (var entry : predMap.entrySet()) {
                 String cellId = entry.getKey();
+                if (reviewedCellIds.contains(cellId)) continue;
                 String fov = fovMap.get(cellId);
                 if (fov == null) continue;
                 totalByFov.merge(fov, 1L, Long::sum);

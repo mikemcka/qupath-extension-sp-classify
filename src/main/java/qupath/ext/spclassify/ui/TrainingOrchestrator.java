@@ -5,6 +5,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
@@ -53,6 +54,7 @@ final class TrainingOrchestrator {
      * @param project          the QuPath project
      * @param currentImageData the open image (excluded from pooling)
      * @param scope            per-image label scope (sanitized binary marker, or null = multi-class)
+     * @param allowedClasses   classes to keep, matched on the effective (post-merge) class; null keeps all
      * @param featureNames     the model's feature-column ordering
      * @param normalizer       feature normalizer applied during extraction (may be null)
      * @param trainLog         progress sink
@@ -61,12 +63,14 @@ final class TrainingOrchestrator {
             Project<BufferedImage> project,
             ImageData<BufferedImage> currentImageData,
             String scope,
+            Set<String> allowedClasses,
             List<String> featureNames,
             FeatureNormalizer normalizer,
             qupath.ext.spclassify.model.BatchShifts batchShifts,
             Consumer<String> trainLog) {
         List<float[]> supplementaryRows = new ArrayList<>();
         List<String> supplementaryLabels = new ArrayList<>();
+        int skippedClass = 0;
 
         List<ProjectImageEntry<BufferedImage>> allEntries = project.getImageList();
         var currentEntry = project.getEntry(currentImageData);
@@ -109,11 +113,16 @@ final class TrainingOrchestrator {
 
                 int added = 0;
                 for (var labelEntry : otherLabels.getAllLabels().entrySet()) {
+                    // Strip merge-history annotation so training sees the effective class
+                    String className = LabelStore.effectiveClassName(labelEntry.getValue());
+                    if (allowedClasses != null && !allowedClasses.contains(className)) {
+                        skippedClass++;
+                        continue;
+                    }
                     PathObject cell = otherCellById.get(labelEntry.getKey());
                     if (cell == null) continue;
                     supplementaryRows.add(otherExtractor.extractRow(cell));
-                    // Strip merge-history annotation so training sees the effective class
-                    supplementaryLabels.add(LabelStore.effectiveClassName(labelEntry.getValue()));
+                    supplementaryLabels.add(className);
                     added++;
                 }
                 if (added > 0) {
@@ -123,6 +132,10 @@ final class TrainingOrchestrator {
             } catch (Exception ex) {
                 trainLog.accept("  ! Could not read " + entry.getImageName() + " (" + ex.getMessage() + ")");
             }
+        }
+        if (skippedClass > 0) {
+            trainLog.accept("Skipped " + skippedClass
+                    + " labels on other images whose class is not in the current class list.");
         }
         trainLog.accept("Pooled total: " + supplementaryRows.size() + " rows.");
         return new PooledLabels(supplementaryRows, supplementaryLabels);
@@ -139,6 +152,7 @@ final class TrainingOrchestrator {
      * @param classifier           the trained dual-model classifier
      * @param featureNames         the model's feature-column ordering
      * @param normalizer           feature normalizer applied during extraction (may be null)
+     * @param scope                the active binary marker (predictions are saved under it), or null
      * @param hierarchyEventSource source object for {@code fireHierarchyChangedEvent}
      * @param trainLog             progress sink
      * @return the number of images successfully classified and saved
@@ -152,6 +166,7 @@ final class TrainingOrchestrator {
             List<String> featureNames,
             FeatureNormalizer normalizer,
             qupath.ext.spclassify.model.BatchShifts batchShifts,
+            String scope,
             Object hierarchyEventSource,
             Consumer<String> trainLog) {
         var currentEntry = project.getEntry(currentImageData);
@@ -235,7 +250,7 @@ final class TrainingOrchestrator {
                     // Prediction Summary and review-mode sampling can pull
                     // disagreements from this image.
                     try {
-                        ProjectStateManager.saveImagePredictions(project, imgNameFinal, otherPredAll);
+                        ProjectStateManager.saveImagePredictions(project, scope, imgNameFinal, otherPredAll);
                     } catch (Exception persistEx) {
                         trainLog.accept("[" + imgNameFinal + "] WARN: could not save predictions JSON: "
                                 + persistEx.getMessage());

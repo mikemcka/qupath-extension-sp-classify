@@ -16,6 +16,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import qupath.ext.spclassify.classifier.ModelType;
 import qupath.ext.spclassify.classifier.TrainingMetrics;
+import qupath.ext.spclassify.model.CellPrediction;
 import qupath.ext.spclassify.model.CellTypeTable;
 import qupath.ext.spclassify.model.LabelStore;
 import qupath.ext.spclassify.model.PopulationSet;
@@ -749,24 +750,43 @@ public class ProjectStateManager {
 
     /**
      * Save Pred_ALL predictions for a specific image.
+     *
+     * @param scope the active binary marker, or null for multi-class
      */
-    public static Path saveImagePredictions(Project<?> project, String imageName, PopulationSet predAll)
+    public static Path saveImagePredictions(Project<?> project, String scope, String imageName, PopulationSet predAll)
             throws IOException {
-        return PredictionPersistence.saveImagePredictions(project, imageName, predAll);
+        return PredictionPersistence.saveImagePredictions(project, scope, imageName, predAll);
     }
 
     /**
      * Load Pred_ALL predictions previously saved for a specific image.
+     *
+     * @param scope the active binary marker, or null for multi-class
      */
-    public static PopulationSet loadImagePredictions(Project<?> project, String imageName) throws IOException {
-        return PredictionPersistence.loadImagePredictions(project, imageName);
+    public static PopulationSet loadImagePredictions(Project<?> project, String scope, String imageName)
+            throws IOException {
+        return PredictionPersistence.loadImagePredictions(project, scope, imageName);
     }
 
     /**
      * List the names of all images in the project that have saved prediction files.
+     *
+     * @param scope the active binary marker, or null for multi-class
      */
-    public static List<String> listImagesWithPredictions(Project<?> project) throws IOException {
-        return PredictionPersistence.listImagesWithPredictions(project);
+    public static List<String> listImagesWithPredictions(Project<?> project, String scope) throws IOException {
+        return PredictionPersistence.listImagesWithPredictions(project, scope);
+    }
+
+    /**
+     * True when {@code predictions} were made with exactly {@code classNames}. Saved predictions
+     * from a different class list (an older model, or binary predictions that earlier versions
+     * wrote to the multi-class file) must not be used with the current model.
+     * Returns true when either side is unknown.
+     */
+    public static boolean predictionsMatchClasses(PopulationSet predictions, List<String> classNames) {
+        if (predictions == null || predictions.size() == 0 || classNames == null) return true;
+        CellPrediction first = predictions.getAll().values().iterator().next();
+        return classNames.equals(first.getClassNames());
     }
     // â”€â”€ Binary classifier persistence
     // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€

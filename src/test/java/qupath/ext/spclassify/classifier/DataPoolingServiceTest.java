@@ -33,6 +33,14 @@ class DataPoolingServiceTest {
     }
 
     @Test
+    void stripsMergeHistoryFromImportedLabels() {
+        var pooled = DataPoolingService.poolImportedRows(
+                List.of(row("CD4T-mergedInto(Tcell)", 1f), row("Tcell", 2f)), List.of("CD3"), List.of("CD3"));
+
+        assertEquals(List.of("Tcell", "Tcell"), pooled.labels());
+    }
+
+    @Test
     void zeroFillsTargetColumnsMissingFromImport() {
         var pooled = DataPoolingService.poolImportedRows(
                 List.of(row("A", 9f)), List.of("CD3"), List.of("CD3", "FOXP3")); // FOXP3 absent from import

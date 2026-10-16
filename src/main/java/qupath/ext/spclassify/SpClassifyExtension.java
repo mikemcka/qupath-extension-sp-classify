@@ -389,7 +389,8 @@ public class SpClassifyExtension implements QuPathExtension, BinaryClassifierMan
                 // immediately when returning to it.
                 if (predAll != null && predAll.size() > 0) {
                     try {
-                        ProjectStateManager.saveImagePredictions(project, oldEntry.getImageName(), predAll);
+                        ProjectStateManager.saveImagePredictions(
+                                project, activeBinaryMarker, oldEntry.getImageName(), predAll);
                     } catch (IOException ex) {
                         logger.warn(
                                 "Failed to save predictions for {} on image switch: {}",
@@ -439,7 +440,7 @@ public class SpClassifyExtension implements QuPathExtension, BinaryClassifierMan
 
                 // Load per-image predictions if available.
                 try {
-                    this.predAll = ProjectStateManager.loadImagePredictions(project, newEntry.getImageName());
+                    this.predAll = loadPredictionsForCurrentModel(project, newEntry.getImageName());
                 } catch (IOException ex) {
                     logger.warn("Failed to load predictions for {}: {}", newEntry.getImageName(), ex.getMessage());
                 }
@@ -634,10 +635,43 @@ public class SpClassifyExtension implements QuPathExtension, BinaryClassifierMan
         if (entry == null) return;
 
         try {
-            ProjectStateManager.saveImagePredictions(project, entry.getImageName(), predAll);
+            ProjectStateManager.saveImagePredictions(project, activeBinaryMarker, entry.getImageName(), predAll);
         } catch (IOException ex) {
             logger.warn("Failed to save predictions for {}: {}", entry.getImageName(), ex.getMessage());
         }
+    }
+
+    /**
+     * Load an image's saved predictions for the active scope (binary marker or multi-class).
+     * Returns null when the file was made with a different class list than the loaded
+     * classifier, so stale predictions are never shown or sampled.
+     */
+    private PopulationSet loadPredictionsForCurrentModel(Project<?> project, String imageName) throws IOException {
+        PopulationSet loaded = ProjectStateManager.loadImagePredictions(project, activeBinaryMarker, imageName);
+        List<String> classNames = classifier != null ? classifier.getClassNames() : null;
+        if (!ProjectStateManager.predictionsMatchClasses(loaded, classNames)) {
+            logger.info("Ignoring saved predictions for '{}': made with a different class list", imageName);
+            return null;
+        }
+        return loaded;
+    }
+
+    /** Save the current image's predictions under the active scope; call before the scope changes. */
+    @Override
+    public void persistCurrentPredictions(QuPathGUI qupath) {
+        persistCurrentImagePredictions(qupath);
+    }
+
+    /**
+     * Replace the in-memory predictions with the current image's saved predictions for the
+     * active scope; call after the scope changes (entering or leaving binary mode).
+     */
+    @Override
+    public void reloadCurrentPredictions(QuPathGUI qupath) {
+        this.predAll = null;
+        this.lastAgreementRates = null;
+        this.lastSampledPredictions = null;
+        loadCurrentImagePredictions(qupath);
     }
 
     /** Load Pred_ALL for the current image if it was previously saved. */
@@ -651,7 +685,7 @@ public class SpClassifyExtension implements QuPathExtension, BinaryClassifierMan
         if (entry == null) return false;
 
         try {
-            var loaded = ProjectStateManager.loadImagePredictions(project, entry.getImageName());
+            var loaded = loadPredictionsForCurrentModel(project, entry.getImageName());
             if (loaded != null && loaded.size() > 0) {
                 this.predAll = loaded;
                 syncPanelState();
@@ -1026,7 +1060,7 @@ public class SpClassifyExtension implements QuPathExtension, BinaryClassifierMan
     void showProjectPredictionSummary(QuPathGUI qupath) {
         // Ensure latest in-memory predictions for current image are included in the summary.
         persistCurrentImagePredictions(qupath);
-        ProjectPredictionSummary.show(qupath, predAll);
+        ProjectPredictionSummary.show(qupath, predAll, activeBinaryMarker);
     }
 
     private void showFeatureImportance(QuPathGUI qupath) {
@@ -1415,8 +1449,12 @@ public class SpClassifyExtension implements QuPathExtension, BinaryClassifierMan
             }
         }
 
-        ReviewSampling.SamplingContext samplingContext =
-                ReviewSampling.buildSamplingContext(qupath, predAll, currentImageOnly);
+        ReviewSampling.SamplingContext samplingContext = ReviewSampling.buildSamplingContext(
+                qupath,
+                predAll,
+                currentImageOnly,
+                activeBinaryMarker,
+                classifier != null ? classifier.getClassNames() : null);
         long disagreeCount = samplingContext.predictions().getDisagreementCount();
         if (disagreeCount == 0) {
             Dialogs.showInfoNotification(
@@ -1613,7 +1651,8 @@ public class SpClassifyExtension implements QuPathExtension, BinaryClassifierMan
             var entry = project.getEntry(imageData);
             if (entry != null) imgName = entry.getImageName();
         }
-        var view = new ConfusionMatrixView(qupath.getStage(), predAll, classNames, labelStore, qupath, imgName);
+        var view = new ConfusionMatrixView(
+                qupath.getStage(), predAll, classNames, labelStore, qupath, imgName, activeBinaryMarker);
         if (classifier != null) view.setModelTypes(classifier.getModel1Type(), classifier.getModel2Type());
         lastAgreementRates = view.getAgreementRates();
         view.show();

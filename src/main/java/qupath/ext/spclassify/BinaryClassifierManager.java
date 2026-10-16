@@ -72,6 +72,12 @@ final class BinaryClassifierManager {
         void syncPanelState();
 
         void selectAndExpandDockPanel(QuPathGUI qupath);
+
+        /** Save the open image's predictions under the current scope, before the scope changes. */
+        void persistCurrentPredictions(QuPathGUI qupath);
+
+        /** Replace the in-memory predictions with the open image's saved ones for the new scope. */
+        void reloadCurrentPredictions(QuPathGUI qupath);
     }
 
     private final Host host;
@@ -153,6 +159,9 @@ final class BinaryClassifierManager {
     void enterBinaryMode(QuPathGUI qupath, String markerName) {
         var project = qupath.getProject();
         if (project == null) return;
+
+        // Predictions are scoped like labels: keep the outgoing scope's, then load this marker's.
+        host.persistCurrentPredictions(qupath);
 
         // Preserve current multi-class state — but only when we're actually transitioning
         // INTO binary mode. If we're already in binary mode (user switched markers without
@@ -281,6 +290,7 @@ final class BinaryClassifierManager {
             }
         }
 
+        host.reloadCurrentPredictions(qupath);
         host.syncPanelState();
         logger.info(
                 "[SP Classify] Entered binary mode for marker '{}' (classes: {})",
@@ -301,6 +311,7 @@ final class BinaryClassifierManager {
         String activeBinaryMarker = host.getActiveBinaryMarker();
         if (activeBinaryMarker == null) return;
         var project = qupath.getProject();
+        host.persistCurrentPredictions(qupath);
 
         // Save binary labels before exiting
         LabelStore labelStore = host.getLabelStore();
@@ -330,6 +341,7 @@ final class BinaryClassifierManager {
         this.preBinaryImportedTrainingRows = null;
         this.preBinaryImportedTrainingFeatureNames = null;
 
+        host.reloadCurrentPredictions(qupath);
         host.syncPanelState();
         logger.info("[SP Classify] Exited binary mode — restored multi-class state");
     }

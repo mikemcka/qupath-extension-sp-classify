@@ -42,8 +42,9 @@ final class ProjectPredictionSummary {
      * @param qupath                 the QuPath GUI
      * @param liveCurrentPredictions the open image's in-memory predictions (may be null); used
      *                               in place of the saved file for the current image
+     * @param scope                  the active binary marker, or null for multi-class
      */
-    static void show(QuPathGUI qupath, PopulationSet liveCurrentPredictions) {
+    static void show(QuPathGUI qupath, PopulationSet liveCurrentPredictions, String scope) {
         var project = qupath.getProject();
         if (project == null) {
             Dialogs.showErrorMessage(EXTENSION_NAME, resources.getString("classify.no_project"));
@@ -111,7 +112,8 @@ final class ProjectPredictionSummary {
                                     predictions = liveCurrent;
                                 } else {
                                     try {
-                                        predictions = ProjectStateManager.loadImagePredictions(project, imageName);
+                                        predictions =
+                                                ProjectStateManager.loadImagePredictions(project, scope, imageName);
                                     } catch (IOException ex) {
                                         logger.warn(
                                                 "Failed to load predictions for {} in project summary: {}",

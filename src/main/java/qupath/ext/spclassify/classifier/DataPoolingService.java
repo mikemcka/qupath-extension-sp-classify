@@ -3,6 +3,7 @@ package qupath.ext.spclassify.classifier;
 import java.util.ArrayList;
 import java.util.List;
 import qupath.ext.spclassify.io.GroundTruthIO;
+import qupath.ext.spclassify.model.LabelStore;
 
 /**
  * Pure helpers for assembling supplementary training data from explicitly imported
@@ -72,7 +73,8 @@ public final class DataPoolingService {
             float[] src = row.features();
             if (src == null) continue;
             rows.add(FeatureMappingService.alignRow(src, featureMap));
-            labels.add(row.label());
+            // Exported ground truth keeps merge history ("a-mergedInto(b)"); train on the effective class.
+            labels.add(LabelStore.effectiveClassName(row.label()));
         }
         return new PooledRows(rows, labels, mappedFeatureCount, rows.size());
     }
