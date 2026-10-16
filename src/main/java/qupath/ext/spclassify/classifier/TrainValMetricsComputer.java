@@ -226,13 +226,15 @@ final class TrainValMetricsComputer {
         float[] evTrainLabels = fold.trainLabels();
         float[] evValData = fold.valData();
         float[] evValLabels = fold.valLabels();
+        // Real cells in the train fold; evTrainSize also counts rows added by resampling.
+        int realTrainCount = fold.split()[0].length;
 
         // ── Eval Model 1 ────────────────────────────────────────────────────
         model1Trainer.train(evTrainData, evTrainLabels, evTrainSize);
         float[][] m1TrainProba = model1Predictor.predict(evTrainData, evTrainSize);
         float[][] m1ValProba = model1Predictor.predict(evValData, valSize);
-        TrainingMetrics model1Train =
-                TrainingMetrics.compute(model1Name + " — Train (80%)", classNames, evTrainLabels, m1TrainProba);
+        TrainingMetrics model1Train = TrainingMetrics.compute(
+                model1Name + " — Train (80%)", classNames, evTrainLabels, m1TrainProba, realTrainCount);
         TrainingMetrics model1Val =
                 TrainingMetrics.compute(model1Name + " — Validation (20%)", classNames, evValLabels, m1ValProba);
 
@@ -240,8 +242,8 @@ final class TrainValMetricsComputer {
         model2Trainer.train(evTrainData, evTrainLabels, evTrainSize);
         float[][] m2TrainProba = model2Predictor.predict(evTrainData, evTrainSize);
         float[][] m2ValProba = model2Predictor.predict(evValData, valSize);
-        TrainingMetrics model2Train =
-                TrainingMetrics.compute(model2Name + " — Train (80%)", classNames, evTrainLabels, m2TrainProba);
+        TrainingMetrics model2Train = TrainingMetrics.compute(
+                model2Name + " — Train (80%)", classNames, evTrainLabels, m2TrainProba, realTrainCount);
         TrainingMetrics model2Val =
                 TrainingMetrics.compute(model2Name + " — Validation (20%)", classNames, evValLabels, m2ValProba);
 

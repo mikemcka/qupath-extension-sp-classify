@@ -124,24 +124,7 @@ public class TrainingMetricsView {
 
     /** Rebuild the displayed text based on the train-rows checkbox state. */
     private void refresh(boolean includeTrain) {
-        StringBuilder sb = new StringBuilder();
-        int trainCount = totalSupport(m1Train);
-        int valCount = totalSupport(m1Val);
-        int total = trainCount + valCount;
-        if (total > 0) {
-            sb.append(String.format(
-                    "Training data used: %d labelled cells (80%% train = %d, 20%% val = %d).%n",
-                    total, trainCount, valCount));
-            sb.append("If this disagrees with the sidebar label count, some labels were\n");
-            sb.append("dropped \u2014 see the training log for the WARN line.\n\n");
-        }
-        sb.append("Held-out validation metrics from an 80/20 stratified split on labelled\n");
-        sb.append("data. These are the honest, generalisation-quality F1 numbers.\n");
-        if (includeTrain) {
-            sb.append("\n80% training-set rows are also shown \u2014 a big gap between train F1\n");
-            sb.append("and validation F1 indicates over-fitting.\n");
-        }
-        sb.append('\n');
+        StringBuilder sb = new StringBuilder(header(m1Train, m1Val, includeTrain));
 
         if (includeTrain) appendBlock(sb, m1Train);
         appendBlock(sb, m1Val);
@@ -151,10 +134,56 @@ public class TrainingMetricsView {
         text.setText(sb.toString());
     }
 
+    /**
+     * Cell counts and explanation shown above the metric tables. Counts come from Model 1's
+     * metrics; both models are scored on the same fold.
+     */
+    static String header(TrainingMetrics m1Train, TrainingMetrics m1Val, boolean includeTrain) {
+        StringBuilder sb = new StringBuilder();
+        int trainCount = m1Train != null ? m1Train.realCount() : 0;
+        int valCount = realValCount(m1Val);
+        int trainScored = totalSupport(m1Train);
+        boolean resampled = trainCount > 0 && trainScored != trainCount;
+        if (trainCount > 0 && valCount > 0) {
+            sb.append(String.format(
+                    "Training data used: %d labelled cells (80%% train = %d, 20%% val = %d).%n",
+                    trainCount + valCount, trainCount, valCount));
+            if (resampled) {
+                sb.append(String.format(
+                        "Balancing changed the 80%% train set to %d rows before training.%n", trainScored));
+                sb.append("The 20% val set is real labelled cells only.\n");
+            }
+            sb.append("If this disagrees with the sidebar label count, some labels were\n");
+            sb.append("dropped \u2014 see the training log for the WARN line.\n\n");
+        } else if (valCount > 0) {
+            // Metrics saved by an older version do not record the real train-set size.
+            sb.append(String.format("Validation set: %d labelled cells.%n", valCount));
+            sb.append("Retrain to show the total labelled-cell count.\n\n");
+        }
+        sb.append("Held-out validation metrics from an 80/20 stratified split on labelled\n");
+        sb.append("data. These are the honest, generalisation-quality F1 numbers.\n");
+        if (includeTrain) {
+            sb.append("\n80% training-set rows are also shown \u2014 a big gap between train F1\n");
+            sb.append("and validation F1 indicates over-fitting.\n");
+            if (resampled) {
+                sb.append("Train rows are scored on the balanced train set, including the\n");
+                sb.append("synthetic rows balancing added.\n");
+            }
+        }
+        sb.append('\n');
+        return sb.toString();
+    }
+
     private static void appendBlock(StringBuilder sb, TrainingMetrics m) {
         if (m == null) return;
         sb.append(m.toFormattedReport());
         sb.append('\n');
+    }
+
+    /** Real cells in the validation fold. It is never resampled, so scored rows are the fallback. */
+    private static int realValCount(TrainingMetrics m) {
+        if (m == null) return 0;
+        return m.realCount() > 0 ? m.realCount() : totalSupport(m);
     }
 
     /** Sum of per-class support — equals the total number of samples scored. */

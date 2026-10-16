@@ -144,6 +144,8 @@ weighted F1                           0.903       500
 
 Tick **Show 80% training-set rows (for over-fit diagnosis)** to also show the scores on the training cells.
 
+The line above the tables gives the number of labelled cells in the 80% and 20% sets. When balancing is on, it also gives the number of rows in the 80% set after balancing; the training-set scores are computed on those rows, including the synthetic ones. The 20% set is never balanced.
+
 ![Training metrics](doc_images/training_metrics.png)
 
 **Validation Confusion Matrix (XGBoost)…** (the name in brackets is Model 1's type) shows the true class (rows) against Model 1's predicted class (columns) for the same 20% of cells. It has two heatmaps: cell counts, and counts as a percentage of each row. The diagonal of the percentage heatmap is each class's recall.
