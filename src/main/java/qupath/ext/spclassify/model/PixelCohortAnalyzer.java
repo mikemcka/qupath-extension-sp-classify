@@ -15,18 +15,18 @@ import qupath.ext.spclassify.util.RobustStats;
  * <a href="https://pypi.org/project/pixel-patrol/">pixel-patrol</a> (MIT) — see
  * {@link ImagePixelStats} for the attribution note.
  * <p>
- * Given one {@link ImagePixelStats.ImageStats} per project image, this computes a
- * handful of robust (MAD-scaled) z-scores for image-level summary scalars
- * (empty/background fraction, mean foreground coverage, peak saturation, median
- * dynamic range), then applies deterministic threshold rules to assign each image
- * a verdict, a set of flag reason codes, and a plain-English review.
+ * Given one {@link ImagePixelStats.ImageStats} per project image, this computes
+ * robust (MAD-scaled) z-scores for image-level summary scalars (empty/background
+ * fraction, mean foreground coverage, peak saturation, median dynamic range,
+ * focus) and for the {@code p99} of each channel, then applies deterministic
+ * threshold rules to assign each image a verdict, a set of flag reason codes, and
+ * a plain-English review.
  * <p>
- * These four image-level scalars have genuine cohort spread, so the robust z is
- * well-behaved. Per-channel intensity-outlier detection was intentionally dropped:
- * a MAD-scaled z on a near-dead channel (whose medians all hover at the noise
- * floor) explodes tiny, meaningless differences into huge z-scores and false
- * "intensity outlier" verdicts. The raw per-channel statistics are still carried
- * through for display and CSV export, but no longer drive any verdict.
+ * The {@code p99} z (intensity outlier) is computed only for channels whose
+ * cohort-median foreground coverage is at least {@code SIGNAL_FOREGROUND_FLOOR}.
+ * A MAD-scaled z on a near-dead channel (whose values all sit at the noise floor)
+ * turns small differences into very large z-scores. Focus is reported but never
+ * flags an image.
  * <p>
  * The robust-z definition is identical to {@link CohortAnomalyAnalyzer}:
  * {@code z = 0.6745 · (x − median) / MAD}. Like that class, this one is free of
@@ -271,7 +271,8 @@ public final class PixelCohortAnalyzer {
                     maxFocusZ[i],
                     maxIntensitySignedZ,
                     maxIntensityChannel,
-                    channelContexts));
+                    channelContexts,
+                    img.imageId()));
         }
 
         reports.sort(Comparator.comparingDouble(PixelCohortReport.ImageReport::score)

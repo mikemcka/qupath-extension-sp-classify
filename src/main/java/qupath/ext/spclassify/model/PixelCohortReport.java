@@ -111,6 +111,7 @@ public record PixelCohortReport(List<ImageReport> images) {
      *                                  vs cohort (drives the intensity-outlier flag)
      * @param maxIntensityChannel       channel carrying that largest p99 z (may be null)
      * @param channels                  per-channel context, channel order
+     * @param imageId                   project entry ID, or {@code null}
      */
     public record ImageReport(
             String imageName,
@@ -131,7 +132,8 @@ public record PixelCohortReport(List<ImageReport> images) {
             double maxFocusZ,
             double maxIntensityZ,
             String maxIntensityChannel,
-            List<ChannelContext> channels) {
+            List<ChannelContext> channels,
+            String imageId) {
 
         public ImageReport {
             imageName = imageName == null ? "" : imageName;

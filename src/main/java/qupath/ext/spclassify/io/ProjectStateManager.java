@@ -993,4 +993,19 @@ public class ProjectStateManager {
     public static qupath.ext.spclassify.model.BatchShifts loadBatchShifts(Project<?> project) {
         return BatchNormPersistence.load(project);
     }
+
+    /**
+     * Save image pixel prescreen results to {@code <project>/celltune/pixel-prescreen.json}.
+     */
+    public static void savePixelPrescreen(Project<?> project, qupath.ext.spclassify.model.PixelPrescreenCache cache)
+            throws IOException {
+        PixelPrescreenPersistence.save(project, cache);
+    }
+
+    /**
+     * Load saved image pixel prescreen results, or {@code null} if none exist / unreadable.
+     */
+    public static qupath.ext.spclassify.model.PixelPrescreenCache loadPixelPrescreen(Project<?> project) {
+        return PixelPrescreenPersistence.load(project);
+    }
 }
