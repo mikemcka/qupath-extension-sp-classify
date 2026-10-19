@@ -35,39 +35,7 @@ There is one group per **marker** (the text before the first `: `, e.g. `DAPI_AF
 
 Your selection is saved in `<project>/celltune/classifier-state.json` and is kept between QuPath sessions.
 
-### 4.2 Clustering normalisation
-
-**Menu:** *Extensions → SP Classify → Clustering Normalisation*
-
-These transforms are used only by clustering, the scatter plot and gating (§[11](scatter-clustering.md)). The classifier always uses raw values. The window has a **Filter:** search box, a prefix dropdown with **Select Prefix** / **Clear Prefix**, **Select All** / **Clear All**, and:
-
-- **Transform:** dropdown:
-  - **arcsinh** — `arcsinh(x / cofactor)`. Recommended. Set **Cofactor:** (default 1.0) for your data, or click **Suggest…** to open a tool that estimates a cofactor from the background level of features you choose.
-    - Raw fluorescence (COMET, CODEX, IF; values in the hundreds to thousands): 25–50.
-    - MIBI: 0.05 (Hartmann et al. 2021; see [References](how-to-cite.md)).
-    - Choose a value near the boundary between background and positive signal. If almost all raw values are below the cofactor, the transform changes very little. If almost all are far above it, low-intensity differences are lost.
-  - **sqrt** — `sqrt(max(0, x))`. No cofactor.
-
-![Clustering normalisation](doc_images/normalise_features.png)
-
-The one transform and cofactor apply to every ticked feature. Unticked features stay raw. Do not tick morphology features (e.g. Cell Area) or features that are already normalised (e.g. foundation-model embeddings).
-
-**Why use it.** Clustering compares cells by distance across all markers. Without a transform, a few very bright markers decide most of the result. arcsinh reduces the effect of bright outliers and keeps differences between dim cells.
-
-**What it does not do.** It does not change the classifier, auto-prune, feature importance or ground-truth export, which all use raw values. It does not correct differences in staining or exposure between slides, because the same transform is applied to every image. For that, use batch normalisation (§[19](batch-normalisation.md)) and label cells on several different slides.
-
-**What clustering does automatically.** The transform in this window is optional. Every clustering run also:
-
-1. z-scores each marker (subtracts the mean and divides by the standard deviation), and
-2. applies PCA when more than 50 markers are selected and **Reduce dims (PCA)** in the scatter plot is ticked (default: ticked).
-
-```
-(optional arcsinh / sqrt)  →  z-score each marker  →  (PCA if > 50 markers)  →  k-means / Leiden
-```
-
-If you set no transform here, clustering runs on z-scored raw values. arcsinh adds one thing z-scoring cannot: it reduces extreme high values within a marker.
-
-### 4.3 Create classes & Class Control
+### 4.2 Create classes & Class Control
 
 **Menu:** *Extensions → SP Classify → Class Control...*
 
@@ -89,7 +57,7 @@ Type a class name and click **Add Class**. This adds the class to QuPath's class
 - Pick a class that was a merge target. The list shows classes found in `-mergedInto(...)` labels.
 - **Undo Merge for Selected Class** — restores each label to its original name and adds the original class back to the class list. The target class is **not** deleted. Remove it from the **Delete** tab if you no longer need it.
 
-### 4.4 Channel mapping for review (marker table)
+### 4.3 Channel mapping for review (marker table)
 
 **Menu:** *Extensions → SP Classify → Channel Mapping (Review Display)...* (or **Edit channel mapping…** in the Review Mode window)
 

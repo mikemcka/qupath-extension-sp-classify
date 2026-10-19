@@ -3,7 +3,7 @@
 Build one **positive/negative classifier per marker** (CD3, CD4, CD8, CD20…), then combine them into composite cell types (`CD3+:CD4+:CD8-`, etc.).
 
 ```
-Select Features  →  Clustering Normalisation
+Select Features
        ↓
 Extensions → SP Classify → Binary Classifiers... → Create... (name it CD3)
 → Open (enters Binary Mode)

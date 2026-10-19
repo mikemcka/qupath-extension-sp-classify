@@ -4,9 +4,9 @@ Everything the extension writes is under `<project>/celltune/`:
 
 ```
 celltune/
-├── classifier-state.json         # Multi-class model (features, classes, models, labels, normalisation)
+├── classifier-state.json         # Multi-class model (features, classes, models, labels)
 ├── composite-rules.json          # Saved composite classification rules
-├── marker-table.json             # Channel mapping for review (§4.4)
+├── marker-table.json             # Channel mapping for review (§4.3)
 ├── binary-registry.json          # List of binary classifiers and their state files
 ├── batch-shifts.json             # Batch normalisation fit (§19)
 ├── pixel-prescreen.json          # Image pixel prescreen results (§17)
