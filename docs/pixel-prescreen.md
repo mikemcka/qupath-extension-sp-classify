@@ -10,7 +10,7 @@ Run this at the start of a project, before segmentation. It reads a low-resoluti
 
 ### How it works
 
-1. Each image is read at the pyramid level closest to 2048 px on its long edge, so every image is compared at the same size. Up to 4 images are read at once.
+1. Each image is read at the pyramid level closest to 2048 px on its long edge, so every image is compared at the same size. Up to 4 images are read at once. Only the pixels are read; the image's objects (cells, annotations) are not loaded. **Cancel** in the progress window stops the scan after the images already being read; those results are kept.
 2. Channels are matched across images by name.
 3. Statistics are calculated for each channel (table below), including a sharpness measure (**focus**).
 4. The image-level values, and the `p99` brightness of each channel that has signal, are converted to robust z-scores across the project: `0.6745 × (value − project median) / MAD`. This is the same method as §8.
@@ -70,8 +70,14 @@ This is followed by a table for each channel (median | p99 | foreground% | dyn.r
 
 **Buttons:**
 - **Open Selected Image** opens the image without saving the current one.
+- **Scan New Images (N)** reads only the N project images that have no saved results (for example, images added after the last scan). The z-scores and flags of every image are then recalculated.
+- **Rescan All** discards the saved results and reads every image again.
 - **Export CSV** writes one row per image: image-level columns (including `MaxFocus`, `MaxFocusZ`, `MaxIntensityZ`, `MaxIntensityChannel`), then a block of columns for each channel (including `LaplacianVariance`).
-- **Close**.
+- **Close** hides the window. The results stay available (see below).
+
+### Saved results
+
+After each scan the per-image statistics are saved to `<project folder>/celltune/pixel-prescreen.json`. Opening the prescreen again, also after restarting QuPath, shows the saved results without reading the images again. The line under the summary shows the time of the last scan and how many project images have no results. Images removed from the project are left out, and renamed images are shown with their new name. Results saved by a version that calculated the statistics differently are discarded and all images are read again.
 
 ### How to read it
 

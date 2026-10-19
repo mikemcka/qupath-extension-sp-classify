@@ -1,25 +1,16 @@
 package qupath.ext.spclassify;
 
 import java.awt.image.BufferedImage;
-import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
 import java.util.ResourceBundle;
-import java.util.concurrent.Callable;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Supplier;
-import javafx.application.Platform;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import qupath.ext.spclassify.classifier.DualModelClassifier;
 import qupath.ext.spclassify.model.CellFeatureExtractor;
 import qupath.ext.spclassify.model.FeatureNormalizer;
-import qupath.ext.spclassify.model.ImagePixelStats;
-import qupath.ext.spclassify.model.ImagePixelStatsReader;
 import qupath.ext.spclassify.model.IntensityHeatmap;
-import qupath.ext.spclassify.model.PixelCohortAnalyzer;
 import qupath.ext.spclassify.model.PopulationSet;
 import qupath.ext.spclassify.ui.DistanceMeasurementsDialog;
 import qupath.ext.spclassify.ui.FeatureImportanceView;
@@ -34,7 +25,6 @@ import qupath.lib.objects.PathObject;
 import qupath.lib.objects.PathObjectFilter;
 import qupath.lib.objects.classes.PathClass;
 import qupath.lib.objects.classes.PathClassTools;
-import qupath.lib.projects.ProjectImageEntry;
 
 /**
  * Read-only analysis/visualisation view launchers lifted out of {@code SpClassifyExtension}.
@@ -308,113 +298,10 @@ final class AnalysisViews {
     /**
      * Open the cells-free <b>image pixel prescreen</b>: whole-image per-channel pixel
      * statistics read off a low-res pyramid level for every project image, contextualised
-     * against the cohort. Reads run in parallel off the FX thread behind a progress dialog.
+     * against the cohort. Saved results are reused; see {@link PixelPrescreenView}.
      */
     static void showImagePixelPrescreen(QuPathGUI qupath) {
-        var project = qupath.getProject();
-        if (project == null) {
-            Dialogs.showErrorMessage(EXTENSION_NAME, resources.getString("classify.no_project"));
-            return;
-        }
-
-        @SuppressWarnings("unchecked")
-        var entries = (List<ProjectImageEntry<BufferedImage>>) (List<?>) project.getImageList();
-        if (entries.isEmpty()) {
-            Dialogs.showInfoNotification(EXTENSION_NAME, "No project images found.");
-            return;
-        }
-
-        var stage = new javafx.stage.Stage();
-        stage.setTitle(EXTENSION_NAME + " — Computing pixel prescreen");
-        stage.initOwner(qupath.getStage());
-        stage.initModality(javafx.stage.Modality.WINDOW_MODAL);
-        stage.setResizable(false);
-        var bar = new javafx.scene.control.ProgressBar(0);
-        bar.setPrefWidth(360);
-        var status = new javafx.scene.control.Label("Scanning project images…");
-        status.setMaxWidth(360);
-        status.setWrapText(true);
-        var box = new javafx.scene.layout.VBox(8, status, bar);
-        box.setPadding(new javafx.geometry.Insets(15));
-        stage.setScene(new javafx.scene.Scene(box));
-        stage.setOnCloseRequest(e -> e.consume());
-        stage.show();
-
-        Thread worker = new Thread(
-                () -> {
-                    int total = entries.size();
-                    AtomicInteger done = new AtomicInteger();
-                    AtomicInteger failed = new AtomicInteger();
-
-                    // One task per image; reads are independent and I/O+decode bound,
-                    // so a small fixed pool gives a near-linear speedup. Capped at 4 to
-                    // bound peak memory — each task holds one decoded downsampled region.
-                    int nThreads = Math.min(Math.max(total, 1), 4);
-                    ExecutorService pool = Executors.newFixedThreadPool(nThreads);
-                    List<Callable<ImagePixelStats.ImageStats>> tasks = new ArrayList<>(total);
-                    for (var entry : entries) {
-                        tasks.add(() -> {
-                            ImagePixelStats.ImageStats result = null;
-                            if (entry != null) {
-                                String imageName = entry.getImageName();
-                                try {
-                                    var data = entry.readImageData();
-                                    try (var server = data.getServer()) {
-                                        result = ImagePixelStatsReader.read(imageName, server);
-                                    }
-                                } catch (Exception ex) {
-                                    failed.incrementAndGet();
-                                    logger.warn(
-                                            "[SP Classify] Pixel prescreen failed to read '{}': {}",
-                                            imageName,
-                                            ex.getMessage());
-                                }
-                            }
-                            final int c = done.incrementAndGet();
-                            Platform.runLater(() -> {
-                                bar.setProgress((double) c / total);
-                                status.setText(String.format("Reading images: %d / %d…", c, total));
-                            });
-                            return result;
-                        });
-                    }
-
-                    // Collect in submission order (deterministic cohort input).
-                    var stats = new ArrayList<ImagePixelStats.ImageStats>(total);
-                    try {
-                        for (var future : pool.invokeAll(tasks)) {
-                            var s = future.get();
-                            if (s != null) {
-                                stats.add(s);
-                            }
-                        }
-                    } catch (InterruptedException ie) {
-                        Thread.currentThread().interrupt();
-                    } catch (java.util.concurrent.ExecutionException ee) {
-                        logger.warn("[SP Classify] Pixel prescreen task failed: {}", ee.getMessage());
-                    } finally {
-                        pool.shutdown();
-                    }
-
-                    var report = PixelCohortAnalyzer.analyze(stats);
-                    final int failedF = failed.get();
-                    Platform.runLater(() -> {
-                        stage.close();
-                        if (report.images().isEmpty()) {
-                            Dialogs.showErrorMessage(
-                                    EXTENSION_NAME, "Could not read pixels from any project image (see log).");
-                            return;
-                        }
-                        if (failedF > 0) {
-                            Dialogs.showWarningNotification(
-                                    EXTENSION_NAME, failedF + " image(s) could not be read (see log).");
-                        }
-                        new PixelPrescreenView(qupath, qupath.getStage(), report).show();
-                    });
-                },
-                "sp-classify-pixel-prescreen");
-        worker.setDaemon(true);
-        worker.start();
+        PixelPrescreenView.open(qupath);
     }
 
     /**

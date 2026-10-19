@@ -65,6 +65,13 @@ import java.util.List;
  */
 public final class ImagePixelStats {
 
+    /**
+     * Version of the statistic definitions in this class. Saved prescreen results
+     * with a different version are not reused. Increase it whenever a change here
+     * changes any computed value.
+     */
+    public static final int STATS_VERSION = 1;
+
     /** Number of histogram bins used for Otsu thresholding. */
     private static final int OTSU_BINS = 256;
 
@@ -121,6 +128,8 @@ public final class ImagePixelStats {
      * @param height        height in pixels of the low-resolution image read
      * @param channels      per-channel statistics, in channel order
      * @param emptyFraction fraction of pixels below the Otsu threshold in every channel
+     * @param imageId       project entry ID ({@code ProjectImageEntry.getID()}), or
+     *                      {@code null} when the image is not from a project
      */
     public record ImageStats(
             String imageName,
@@ -128,11 +137,28 @@ public final class ImagePixelStats {
             int width,
             int height,
             List<ChannelStats> channels,
-            double emptyFraction) {
+            double emptyFraction,
+            String imageId) {
 
         public ImageStats {
             imageName = imageName == null ? "" : imageName;
             channels = channels == null ? List.of() : List.copyOf(channels);
+        }
+
+        /** Statistics without a project entry ID. */
+        public ImageStats(
+                String imageName,
+                double downsample,
+                int width,
+                int height,
+                List<ChannelStats> channels,
+                double emptyFraction) {
+            this(imageName, downsample, width, height, channels, emptyFraction, null);
+        }
+
+        /** @return a copy with a different display name and entry ID. */
+        public ImageStats withIdentity(String newName, String newId) {
+            return new ImageStats(newName, downsample, width, height, channels, emptyFraction, newId);
         }
     }
 
