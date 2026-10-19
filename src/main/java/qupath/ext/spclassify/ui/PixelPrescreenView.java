@@ -25,6 +25,7 @@ import javafx.scene.control.CheckBox;
 import javafx.scene.control.ComboBox;
 import javafx.scene.control.Label;
 import javafx.scene.control.ProgressBar;
+import javafx.scene.control.TableCell;
 import javafx.scene.control.TableColumn;
 import javafx.scene.control.TableView;
 import javafx.scene.control.TextArea;
@@ -154,11 +155,18 @@ public class PixelPrescreenView {
         TableColumn<PixelCohortReport.ImageReport, String> verdictCol = new TableColumn<>("Verdict");
         verdictCol.setCellValueFactory(
                 cd -> new SimpleStringProperty(cd.getValue().verdict()));
-        verdictCol.setMinWidth(120);
+        verdictCol.setMinWidth(140);
 
         TableColumn<PixelCohortReport.ImageReport, Number> scoreCol = new TableColumn<>("Score");
         scoreCol.setCellValueFactory(
                 cd -> new SimpleObjectProperty<>(cd.getValue().score()));
+        scoreCol.setCellFactory(col -> new TableCell<>() {
+            @Override
+            protected void updateItem(Number item, boolean empty) {
+                super.updateItem(item, empty);
+                setText(empty || item == null ? null : num(item.doubleValue()));
+            }
+        });
         scoreCol.setStyle("-fx-alignment: CENTER-RIGHT;");
 
         TableColumn<PixelCohortReport.ImageReport, String> tissueCol = new TableColumn<>("Tissue %");

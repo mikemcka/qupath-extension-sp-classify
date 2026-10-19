@@ -323,7 +323,7 @@ The window has a **Filter:** search box, a prefix dropdown with **Select Prefix*
     - Choose a value near the boundary between background and positive signal. If almost all raw values are below the cofactor, the transform changes very little. If almost all are far above it, low-intensity differences are lost.
   - **sqrt** — `sqrt(max(0, x))`. No cofactor.
 
-![Clustering normalisation](doc_images/normalise_features.png)
+![Clustering normalisation](doc_images/clustering_normalisation.png)
 
 The one transform and cofactor apply to every ticked feature. Unticked features stay raw. Do not tick morphology features (e.g. Cell Area) or features that are already normalised (e.g. foundation-model embeddings).
 

@@ -174,7 +174,7 @@ There is one group per **marker** (the text before the first `: `, e.g. `DAPI_AF
 - **Embeddings** — dimensionality-reduction and embedding columns: UMAP, PCA, t-SNE, and `*_emb_*` names (e.g. `kronos_emb_0`).
 - **Other / Uncategorized** — features that fit none of the groups above.
 
-![Feature selection](doc_images/feature_selection.png)
+![Select Features for Training](doc_images/select_features.png)
 
 **Do you need to remove features by hand?** Usually not. Extra or near-duplicate features rarely lower accuracy with the default models, but they make training slower and split a marker's importance across several columns in the feature-importance plot. Leave **Auto-prune features** ticked to remove them automatically.
 
@@ -1072,7 +1072,7 @@ The window has a **Filter:** search box, a prefix dropdown with **Select Prefix*
     - Choose a value near the boundary between background and positive signal. If almost all raw values are below the cofactor, the transform changes very little. If almost all are far above it, low-intensity differences are lost.
   - **sqrt** — `sqrt(max(0, x))`. No cofactor.
 
-![Clustering normalisation](doc_images/normalise_features.png)
+![Clustering normalisation](doc_images/clustering_normalisation.png)
 
 The one transform and cofactor apply to every ticked feature. Unticked features stay raw. Do not tick morphology features (e.g. Cell Area) or features that are already normalised (e.g. foundation-model embeddings).
 
@@ -1396,6 +1396,10 @@ The **review pane** below the table explains the result for the selected image, 
 > Suggested action: review / consider removing — little tissue.
 
 This is followed by a table for each channel (median | p99 | foreground% | dyn.range | sat% | focus).
+
+The image below is flagged **Background-heavy**: tissue covers a few small areas and the rest of the image is empty.
+
+![Example of a Background-heavy image](doc_images/prescreen_image_example.png)
 
 **Buttons:**
 - **Open Selected Image** opens the image without saving the current one.

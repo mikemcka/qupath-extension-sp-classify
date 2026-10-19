@@ -20,7 +20,7 @@ There is one group per **marker** (the text before the first `: `, e.g. `DAPI_AF
 - **Embeddings** — dimensionality-reduction and embedding columns: UMAP, PCA, t-SNE, and `*_emb_*` names (e.g. `kronos_emb_0`).
 - **Other / Uncategorized** — features that fit none of the groups above.
 
-![Feature selection](doc_images/feature_selection.png)
+![Select Features for Training](doc_images/select_features.png)
 
 **Do you need to remove features by hand?** Usually not. Extra or near-duplicate features rarely lower accuracy with the default models, but they make training slower and split a marker's importance across several columns in the feature-importance plot. Leave **Auto-prune features** ticked to remove them automatically.
 

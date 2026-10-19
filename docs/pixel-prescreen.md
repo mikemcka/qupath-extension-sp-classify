@@ -73,6 +73,10 @@ The **review pane** below the table explains the result for the selected image, 
 
 This is followed by a table for each channel (median | p99 | foreground% | dyn.range | sat% | focus).
 
+The image below is flagged **Background-heavy**: tissue covers a few small areas and the rest of the image is empty.
+
+![Example of a Background-heavy image](doc_images/prescreen_image_example.png)
+
 **Buttons:**
 - **Open Selected Image** opens the image without saving the current one.
 - **Scan New Images (N)** reads only the N project images that have no saved results (for example, images added after the last scan). The z-scores and flags of every image are then recalculated.
