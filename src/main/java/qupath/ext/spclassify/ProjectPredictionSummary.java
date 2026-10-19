@@ -318,7 +318,12 @@ final class ProjectPredictionSummary {
                 continue;
             }
             parts.add(String.format(
-                    "%s (count=%d, fold=%.2fx)", className, enrichment.count(), enrichment.enrichmentFold()));
+                    java.util.Locale.ROOT,
+                    "%s (count=%d, %.1fx the typical image, z=%+.1f)",
+                    className,
+                    enrichment.count(),
+                    enrichment.foldVsTypical(),
+                    enrichment.outlierZ()));
         }
         return String.join("; ", parts);
     }

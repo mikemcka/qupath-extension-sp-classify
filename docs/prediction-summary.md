@@ -14,7 +14,7 @@ The counts are saved to `<project>/celltune/prediction-summary-cache.json`. When
 
 **Filters:**
 - **Flagged only**: hide images that have no flag.
-- **Target class:** show only images where the chosen class has the `RARE_ENRICHMENT` flag. The list contains only classes that have this flag in at least one image. Default: **All classes**.
+- **Target class:** show only images where the chosen class has the `RARE_ENRICHMENT` flag. The details pane shows each flagged class as `count`, how many times the median image's fraction it is, and its z-score. The list contains only classes that have this flag in at least one image. Default: **All classes**.
 - **Threshold preset:** hide unflagged images whose anomaly score is below the preset: `strict` 1.5, `balanced` 0.5, `sensitive` 0.0 (default; shows every image). Flagged images are always shown. The analysis is not re-run.
 
 **Buttons:**
@@ -39,9 +39,9 @@ For each image:
 Composition has the larger weight because the disagreement rate partly depends on which two model types you chose. Use the score to rank images. It is not a probability.
 
 **Flag reasons:**
-- `RARE_ENRICHMENT`: a class that is under 1% of all cells in the project has at least 20 cells in this image and is at least 3× more common here than in the whole project.
+- `RARE_ENRICHMENT`: a class that is at most 1% of all cells in the project has at least 20 cells in this image, and its fraction in this image is far above its fraction in the other images. "Far above" means a robust z-score ≥ 3 of `log((cells of the class + 0.5) / (cells in the image + 1))` across images. The MAD used for this z-score is at least `0.6745 × ln(3) / 3` (0.247), so the flag also always needs at least 3× the class fraction of the median image. Rare classes are often absent from many images and clustered in others, so being several times the project average is common and is not flagged on its own.
 - `COMPOSITION_OUTLIER`: composition z-score ≥ 3.
-- `HIGH_DISAGREEMENT`: disagreement z-score ≥ 3.
+- `HIGH_DISAGREEMENT`: disagreement z-score ≥ 3, and at least 200 predicted cells in the image. With fewer cells the disagreement rate varies too much by chance (a typical image with 20–50 cells can reach a z-score of +4 to +9). These images still get an anomaly score.
 
 **How to use it:**
 - Sort by **Anomaly** (the default sort). Check the top rows first.

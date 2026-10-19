@@ -12,6 +12,21 @@ import qupath.ext.spclassify.util.RobustStats;
 
 /**
  * Cohort-level scoring for rare-type enrichment and image anomaly detection.
+ * <p>
+ * <b>RARE_ENRICHMENT.</b> A class that is at most {@code rareBaselineCutoff} of all
+ * project cells is "rare". For each rare class, every image's class fraction is put on
+ * a log scale, {@code log((count + 0.5) / (cells + 1))}, and compared across images with
+ * a robust z. The flag needs that z ≥ {@code rareOutlierZ} and ≥ {@code rareMinCount}
+ * cells. Rare classes are patchy (absent from many images, clustered in others), so
+ * "N× the project average" — the previous rule — fired on a quarter of the images of a
+ * real cohort; comparing with the spread across images does not. The MAD is floored at
+ * {@code 0.6745 · ln(rareEnrichmentFoldMin) / rareOutlierZ}, so that when most images
+ * have the same fraction (e.g. none) the flag still needs at least
+ * {@code rareEnrichmentFoldMin}× the median image's fraction, and never fires on noise.
+ * <p>
+ * <b>HIGH_DISAGREEMENT</b> is not set for images with fewer than
+ * {@code disagreementMinCells} predicted cells: with 20–50 cells a typical image reaches
+ * a disagreement z of +4 to +9 by chance. Their z still counts in the anomaly score.
  */
 public final class CohortAnomalyAnalyzer {
 
@@ -66,8 +81,11 @@ public final class CohortAnomalyAnalyzer {
         var orderedClasses = classNames.stream().sorted().toList();
         var baselineFractions = computeBaselineFractions(safeInputs, orderedClasses, thresholds);
 
+        var rareStats = rareClassOutliers(safeInputs, orderedClasses, baselineFractions, thresholds);
+
         var rows = new ArrayList<Intermediate>(safeInputs.size());
         var compositionValues = new double[safeInputs.size()];
+        var predictedCells = new long[safeInputs.size()];
         var disagreementValues = new double[safeInputs.size()];
 
         int idx = 0;
@@ -85,23 +103,26 @@ public final class CohortAnomalyAnalyzer {
                 double baseline = baselineFractions.getOrDefault(className, 0.0);
                 double image = imageFractions.getOrDefault(className, 0.0);
                 double fold = baseline > 0.0 ? image / baseline : 0.0;
-                boolean rareCandidate = baseline <= thresholds.rareBaselineCutoff();
-                boolean highlighted = rareCandidate
-                        && count >= thresholds.rareMinCount()
-                        && fold >= thresholds.rareEnrichmentFoldMin();
+                RareStats rs = rareStats.get(className);
+                boolean rareCandidate = rs != null;
+                double z = rareCandidate ? rs.z()[idx] : Double.NaN;
+                double foldVsTypical = rareCandidate ? rs.foldVsTypical()[idx] : Double.NaN;
+                boolean highlighted =
+                        rareCandidate && count >= thresholds.rareMinCount() && z >= thresholds.rareOutlierZ();
                 if (highlighted) {
                     highlightedClasses.add(className);
                 }
                 enrichments.put(
                         className,
                         new CohortAnomalyReport.ClassEnrichment(
-                                className, count, baseline, image, fold, rareCandidate, highlighted));
+                                className, count, baseline, image, fold, rareCandidate, highlighted, foldVsTypical, z));
             }
 
             double compositionDistance = jensenShannonDistance(imageFractions, baselineFractions, orderedClasses);
             double disagreementRate = disagreementRate(input);
             compositionValues[idx] = compositionDistance;
             disagreementValues[idx] = disagreementRate;
+            predictedCells[idx] = input.predictedCells();
 
             rows.add(new Intermediate(
                     input.imageName(), enrichments, highlightedClasses, compositionDistance, disagreementRate));
@@ -129,7 +150,8 @@ public final class CohortAnomalyAnalyzer {
             if (compositionZ[i] >= thresholds.robustZOutlierThreshold()) {
                 reasons.add(CohortAnomalyReport.OUTLIER_COMPOSITION);
             }
-            if (disagreementZ[i] >= thresholds.robustZOutlierThreshold()) {
+            if (disagreementZ[i] >= thresholds.robustZOutlierThreshold()
+                    && predictedCells[i] >= thresholds.disagreementMinCells()) {
                 reasons.add(CohortAnomalyReport.OUTLIER_DISAGREEMENT);
             }
 
@@ -153,6 +175,56 @@ public final class CohortAnomalyAnalyzer {
                 .thenComparing(CohortAnomalyReport.ImageAnomaly::imageName));
 
         return new CohortAnomalyReport(output);
+    }
+
+    /** Per rare class: robust z of each image's log class fraction, and its fold vs the median image. */
+    private record RareStats(double[] z, double[] foldVsTypical) {}
+
+    /**
+     * Robust z of {@code log((count + 0.5) / (cells + 1))} across images, for every rare
+     * class, with the MAD floored so that z ≥ {@code rareOutlierZ} implies at least
+     * {@code rareEnrichmentFoldMin}× the median image's fraction. Indexed like the
+     * non-null entries of {@code inputs}.
+     */
+    private static Map<String, RareStats> rareClassOutliers(
+            List<CohortAnomalyReport.ImageInput> inputs,
+            List<String> orderedClasses,
+            Map<String, Double> baselineFractions,
+            CohortAnomalyReport.Thresholds thresholds) {
+        var nonNull = inputs.stream().filter(java.util.Objects::nonNull).toList();
+        double madFloor = RobustStats.MAD_TO_SIGMA
+                * Math.log(Math.max(1.0, thresholds.rareEnrichmentFoldMin()))
+                / thresholds.rareOutlierZ();
+        var out = new LinkedHashMap<String, RareStats>();
+        for (String className : orderedClasses) {
+            if (baselineFractions.getOrDefault(className, 0.0) > thresholds.rareBaselineCutoff()) {
+                continue;
+            }
+            double[] logFraction = new double[nonNull.size()];
+            for (int i = 0; i < nonNull.size(); i++) {
+                var in = nonNull.get(i);
+                long count = in.classCounts().getOrDefault(className, 0L);
+                long total = 0L;
+                for (long c : in.classCounts().values()) {
+                    total += c;
+                }
+                logFraction[i] = Math.log((count + 0.5) / (total + 1.0));
+            }
+            double median = RobustStats.median(logFraction);
+            double[] absDev = new double[logFraction.length];
+            for (int i = 0; i < logFraction.length; i++) {
+                absDev[i] = Math.abs(logFraction[i] - median);
+            }
+            double scale = Math.max(RobustStats.median(absDev), madFloor);
+            double[] z = new double[logFraction.length];
+            double[] fold = new double[logFraction.length];
+            for (int i = 0; i < logFraction.length; i++) {
+                z[i] = scale > 0 ? RobustStats.MAD_TO_SIGMA * (logFraction[i] - median) / scale : 0.0;
+                fold[i] = Math.exp(logFraction[i] - median);
+            }
+            out.put(className, new RareStats(z, fold));
+        }
+        return out;
     }
 
     private static double disagreementRate(CohortAnomalyReport.ImageInput input) {
