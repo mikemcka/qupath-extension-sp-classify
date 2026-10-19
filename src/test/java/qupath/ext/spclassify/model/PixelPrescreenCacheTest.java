@@ -66,6 +66,12 @@ class PixelPrescreenCacheTest {
     }
 
     @Test
+    void mergeKeepsTissueChannelChoice() {
+        var cache = PixelPrescreenCache.empty().withTissueChannel("DRAQ5").merge(List.of(stats("a", "1", 0.1)), "t");
+        assertEquals("DRAQ5", cache.tissueChannel());
+    }
+
+    @Test
     void nullImageListBecomesEmpty() {
         var cache = new PixelPrescreenCache(1, 2048, null, null);
         assertTrue(cache.images().isEmpty());

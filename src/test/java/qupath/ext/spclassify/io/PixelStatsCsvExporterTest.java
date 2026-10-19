@@ -61,7 +61,8 @@ class PixelStatsCsvExporterTest {
         String[] lines = csv.split("\\n");
 
         String header = lines[0];
-        assertTrue(header.startsWith("Image,Verdict,Flags,Score,EmptyFraction"), header);
+        assertTrue(header.startsWith("Image,Verdict,Flags,Score,TissueFraction,TissueFractionZ,TissueSource"), header);
+        assertTrue(header.contains("BrightnessShift,BrightnessShiftZ,MaxMarkerZ,MaxMarkerChannel"), header);
         assertTrue(header.contains("\"DAPI: Median\""), header);
         assertTrue(header.contains("\"CD8: SaturationFraction\""), header);
         // One header + five image rows.

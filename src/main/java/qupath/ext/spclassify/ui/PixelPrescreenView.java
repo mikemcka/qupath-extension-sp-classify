@@ -22,11 +22,13 @@ import javafx.geometry.Pos;
 import javafx.scene.Scene;
 import javafx.scene.control.Button;
 import javafx.scene.control.CheckBox;
+import javafx.scene.control.ComboBox;
 import javafx.scene.control.Label;
 import javafx.scene.control.ProgressBar;
 import javafx.scene.control.TableColumn;
 import javafx.scene.control.TableView;
 import javafx.scene.control.TextArea;
+import javafx.scene.control.Tooltip;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.VBox;
@@ -91,6 +93,10 @@ public class PixelPrescreenView {
     private final CheckBox flaggedOnlyBox;
     private final Button scanNewButton;
     private final Button rescanAllButton;
+    private final ComboBox<String> tissueChannelBox;
+    private boolean updatingTissueBox;
+
+    private static final String AUTO = "Auto";
 
     /**
      * Open the prescreen for the current project. Shows the existing window if there is
@@ -155,15 +161,10 @@ public class PixelPrescreenView {
                 cd -> new SimpleObjectProperty<>(cd.getValue().score()));
         scoreCol.setStyle("-fx-alignment: CENTER-RIGHT;");
 
-        TableColumn<PixelCohortReport.ImageReport, String> fgCol = new TableColumn<>("Foreground %");
-        fgCol.setCellValueFactory(
-                cd -> new SimpleStringProperty(pct(cd.getValue().meanForegroundCoverage())));
-        fgCol.setStyle("-fx-alignment: CENTER-RIGHT;");
-
-        TableColumn<PixelCohortReport.ImageReport, String> emptyCol = new TableColumn<>("Empty %");
-        emptyCol.setCellValueFactory(
-                cd -> new SimpleStringProperty(pct(cd.getValue().emptyFraction())));
-        emptyCol.setStyle("-fx-alignment: CENTER-RIGHT;");
+        TableColumn<PixelCohortReport.ImageReport, String> tissueCol = new TableColumn<>("Tissue %");
+        tissueCol.setCellValueFactory(
+                cd -> new SimpleStringProperty(pct(cd.getValue().tissueFraction())));
+        tissueCol.setStyle("-fx-alignment: CENTER-RIGHT;");
 
         TableColumn<PixelCohortReport.ImageReport, String> satCol = new TableColumn<>("Max sat %");
         satCol.setCellValueFactory(
@@ -175,15 +176,28 @@ public class PixelPrescreenView {
                 cd -> new SimpleStringProperty(num(cd.getValue().medianDynamicRange())));
         dynCol.setStyle("-fx-alignment: CENTER-RIGHT;");
 
+        TableColumn<PixelCohortReport.ImageReport, String> brightnessCol = new TableColumn<>("Brightness");
+        brightnessCol.setCellValueFactory(
+                cd -> new SimpleStringProperty(ratio(cd.getValue().brightnessShift())));
+        brightnessCol.setStyle("-fx-alignment: CENTER-RIGHT;");
+
+        TableColumn<PixelCohortReport.ImageReport, String> brightnessZCol = new TableColumn<>("Brightness z");
+        brightnessZCol.setCellValueFactory(
+                cd -> new SimpleStringProperty(num(cd.getValue().brightnessShiftZ())));
+        brightnessZCol.setStyle("-fx-alignment: CENTER-RIGHT;");
+
+        TableColumn<PixelCohortReport.ImageReport, String> markerCol = new TableColumn<>("Top marker z");
+        markerCol.setCellValueFactory(cd -> {
+            var r = cd.getValue();
+            return new SimpleStringProperty(
+                    r.maxMarkerChannel() == null ? "-" : r.maxMarkerChannel() + " " + num(r.maxMarkerZ()));
+        });
+        markerCol.setMinWidth(120);
+
         TableColumn<PixelCohortReport.ImageReport, String> focusCol = new TableColumn<>("Focus");
         focusCol.setCellValueFactory(
                 cd -> new SimpleStringProperty(num(cd.getValue().maxFocus())));
         focusCol.setStyle("-fx-alignment: CENTER-RIGHT;");
-
-        TableColumn<PixelCohortReport.ImageReport, String> intensityCol = new TableColumn<>("Intensity z");
-        intensityCol.setCellValueFactory(
-                cd -> new SimpleStringProperty(num(cd.getValue().maxIntensityZ())));
-        intensityCol.setStyle("-fx-alignment: CENTER-RIGHT;");
 
         TableColumn<PixelCohortReport.ImageReport, String> flaggedCol = new TableColumn<>("Flagged");
         flaggedCol.setCellValueFactory(
@@ -193,12 +207,13 @@ public class PixelPrescreenView {
         table.getColumns().add(imageCol);
         table.getColumns().add(verdictCol);
         table.getColumns().add(scoreCol);
-        table.getColumns().add(fgCol);
-        table.getColumns().add(emptyCol);
+        table.getColumns().add(tissueCol);
         table.getColumns().add(satCol);
         table.getColumns().add(dynCol);
+        table.getColumns().add(brightnessCol);
+        table.getColumns().add(brightnessZCol);
+        table.getColumns().add(markerCol);
         table.getColumns().add(focusCol);
-        table.getColumns().add(intensityCol);
         table.getColumns().add(flaggedCol);
 
         scoreCol.setSortType(TableColumn.SortType.DESCENDING);
@@ -219,7 +234,16 @@ public class PixelPrescreenView {
 
         scanLabel = new Label();
 
-        HBox filtersRow = new HBox(10, flaggedOnlyBox);
+        tissueChannelBox = new ComboBox<>();
+        tissueChannelBox.setTooltip(new Tooltip(
+                "Nuclear channel used to measure tissue. Auto uses the nuclear channel present in most images."));
+        tissueChannelBox.valueProperty().addListener((obs, oldVal, newVal) -> {
+            if (!updatingTissueBox && newVal != null) {
+                setTissueChannel(AUTO.equals(newVal) ? null : newVal);
+            }
+        });
+
+        HBox filtersRow = new HBox(10, flaggedOnlyBox, new Label("Tissue channel:"), tissueChannelBox);
         filtersRow.setAlignment(Pos.CENTER_LEFT);
 
         scanNewButton = new Button("Scan New Images");
@@ -273,7 +297,8 @@ public class PixelPrescreenView {
     /** Recompute the report from the saved stats of the images currently in the project. */
     private void refresh() {
         var images = projectImages();
-        report = PixelCohortAnalyzer.analyze(cache.forProject(images));
+        report = PixelCohortAnalyzer.analyze(
+                cache.forProject(images), PixelCohortReport.DEFAULT_THRESHOLDS, cache.tissueChannel());
         missingCount = cache.missingIds(images.keySet()).size();
         var selected = table.getSelectionModel().getSelectedItem();
         backing.setAll(report.images());
@@ -286,12 +311,43 @@ public class PixelPrescreenView {
         String when = cache.scannedAt() == null ? "never" : formatScanTime(cache.scannedAt());
         scanLabel.setText(String.format(
                 Locale.ROOT,
-                "Last scan: %s | images not scanned: %d%s",
+                "Last scan: %s | images not scanned: %d%s | tissue measured on: %s",
                 when,
                 missingCount,
-                missingCount > 0 ? " (use Scan New Images)" : ""));
+                missingCount > 0 ? " (use Scan New Images)" : "",
+                report.tissueChannel() != null ? report.tissueChannel() : "all channels (no nuclear channel found)"));
+        updateTissueChannelBox();
         updateButtons();
         applyFilters();
+    }
+
+    private void updateTissueChannelBox() {
+        updatingTissueBox = true;
+        try {
+            var items = new java.util.ArrayList<String>();
+            items.add(AUTO);
+            items.addAll(report.tissueChannels());
+            tissueChannelBox.getItems().setAll(items);
+            String saved = cache.tissueChannel();
+            tissueChannelBox.setValue(saved != null && report.tissueChannels().contains(saved) ? saved : AUTO);
+            tissueChannelBox.setDisable(report.tissueChannels().isEmpty());
+        } finally {
+            updatingTissueBox = false;
+        }
+    }
+
+    /** Recompute with a different tissue channel and save the choice with the results. */
+    private void setTissueChannel(String channel) {
+        if (java.util.Objects.equals(channel, cache.tissueChannel())) {
+            return;
+        }
+        cache = cache.withTissueChannel(channel);
+        try {
+            ProjectStateManager.savePixelPrescreen(project, cache);
+        } catch (IOException ex) {
+            logger.warn("[SP Classify] Could not save pixel prescreen results: {}", ex.getMessage());
+        }
+        refresh();
     }
 
     private static String formatScanTime(String iso) {
@@ -331,7 +387,7 @@ public class PixelPrescreenView {
         if (!projectStillOpen()) {
             return;
         }
-        cache = PixelPrescreenCache.empty();
+        cache = PixelPrescreenCache.empty().withTissueChannel(cache.tissueChannel());
         scan(projectEntries(project), false);
     }
 
@@ -542,6 +598,10 @@ public class PixelPrescreenView {
 
     private static String pct(double frac) {
         return Double.isNaN(frac) ? "-" : String.format(Locale.ROOT, "%.1f%%", frac * 100.0);
+    }
+
+    private static String ratio(double v) {
+        return Double.isNaN(v) ? "-" : String.format(Locale.ROOT, "%.2f×", v);
     }
 
     private static String num(double v) {
