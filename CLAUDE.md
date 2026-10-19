@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository. It is the single source of truth for build, architecture, and conventions. (`AGENTS.md` is a stub pointing here so other agent tooling resolves it too.)
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository. It is the single source of truth for build, architecture, and conventions.
 
 ## What this is
 
@@ -94,7 +94,7 @@ Steps applied: `palantirJavaFormat` + `removeUnusedImports`. Set `isEnforceCheck
 
 ## Architecture
 
-Entry point: `src/main/java/qupath/ext/celltune/SpClassifyExtension.java` — registers menus, docks the sidebar panel, and manages project-level state. Data flows as the active-learning loop: seed labels → train dual classifiers → inspect inter-model confusion → review disagreement cells → merge labels → retrain.
+Entry point: `src/main/java/qupath/ext/spclassify/SpClassifyExtension.java` — registers menus, docks the sidebar panel, and manages project-level state. Data flows as the active-learning loop: seed labels → train dual classifiers → inspect inter-model confusion → review disagreement cells → merge labels → retrain.
 
 | Package | Key Classes | Purpose |
 |---------|-------------|---------|
@@ -116,7 +116,7 @@ Entry point: `src/main/java/qupath/ext/celltune/SpClassifyExtension.java` — re
 - `SpClassifyExtension.cellTypeTableProject` records which project the in-memory table belongs to. On image change the table is **always** re-read from the project (null if absent) — the old `if (saved != null)` guard leaked one project's mapping into another, and an editor save would then have written it there. `ChannelMappingDialog` also refuses to save if the project changed while it was open.
 - CSV parsing (`CellTypeTable.parseCsvLine`) is RFC-4180 and strips a UTF-8 BOM; unquoted lines split exactly as `split(",", -1)` did. Simple format reads columns 1–5 as markers always and later columns only if their header starts with `marker`. Exports of tables without the new features are byte-identical to before (pinned by tests).
 
-The 5-tier weighted uncertainty sampling that builds the review queue lives in `classifier/UncertaintySampler`; see [USER_GUIDE.md](USER_GUIDE.md) for the end-user workflows and [RISKS.md](RISKS.md) for the full risk register.
+The 5-tier weighted uncertainty sampling that builds the review queue lives in `classifier/UncertaintySampler`; see [USER_GUIDE.md](USER_GUIDE.md) for the end-user workflows.
 
 ## QuPath 0.7 API notes
 
@@ -145,7 +145,7 @@ Verified against QuPath 0.7.0:
 
 - **LightGBM SHAP crashes the JVM**: Calling `LGBMBooster.predictForMat(... C_API_PREDICT_CONTRIB)` causes a fatal SIGSEGV. `LightGBMModel.computeMeanAbsShap()` exists but is intentionally not called. Do not re-enable LightGBM SHAP without testing in isolation first.
 - **XGBoost4J version lock**: The Java API changed significantly between 1.x, 2.x, and 3.x. The project uses `xgboost4j_2.13:2.1.4` (non-GPU). Do not upgrade without thorough testing — `predictContrib()` (TreeSHAP) behaviour and method signatures may change across major versions. `build.gradle.kts` is the authoritative source for the pinned version.
-- **Binary classification SHAP**: For exactly 2 classes, feature importance bars are identical for both classes — this is expected (see [RISKS.md](RISKS.md#24-binary-classification-shap-display)).
+- **Binary classification SHAP**: For exactly 2 classes, feature importance bars are identical for both classes — this is expected.
 - **CompositeClassificationRule validation**: Rules enforce a max of 128 conditions and a max rule name length of 120 characters. Marker names in rules are validated against the live `BinaryClassifierRegistry` at build time.
 - **Smile native PCA/UMAP need `java.base/java.lang` opened**: Smile's `PCA` (`Matrix.svd` → OpenBLAS) and `UMAP` (spectral init → ARPACK) load native libraries through JavaCPP, which reflects into `java.lang.Runtime`. Under the Java module system this throws `InaccessibleObjectException` (wrapped in `ExceptionInInitializerError`, then `NoClassDefFoundError` on retries — both `LinkageError`, NOT `Exception`) unless the JVM was started with `--add-opens=java.base/java.lang=ALL-UNNAMED`. `JvmModuleOpener.ensureJavaLangOpen()` (called from `installExtension`) opens it programmatically at startup via `sun.misc.Unsafe` + `IMPL_LOOKUP` → `Module.implAddOpensToAllUnnamed`, so users need no launch flags. This MUST run before any Smile native class is first touched — once `arpack.<clinit>` fails it is poisoned for the JVM's lifetime. `ScatterPlotView` also catches `LinkageError` (not just `Exception`) around the UMAP/embedding call and falls back to PCA as defence-in-depth. The `Unsafe` accessors are deprecated-for-removal; fine through JDK 25, but if a future JDK removes them the opener returns `false` and the PCA fallback / `--add-opens` hint take over.
 - **`ResamplerGoldenTest`'s constants are an oracle, not a snapshot of current behaviour**: they were captured against the pre-optimisation brute-force implementation and pin the exact output size, per-class counts and a content checksum over every value and label, for all five strategies. A failure means the resampled training set changed — which changes the trained model. Investigate; **never re-baseline them to make a change pass.** `Resampler`'s internals are built for speed (primitive buffers, memoised SMOTE kNN, class-partitioned + parallel Tomek search) but are exactly value-preserving, and the tests also assert invariance to thread count. Two things are load-bearing and easy to break: the k-pass selection sort in `knnSameClass` must stay verbatim (its swap history decides which of several equidistant neighbours wins), and Tomek's "lowest index wins" tie-break must stay **explicit** (`d < best || (d == best && j < bestIdx)`) — the original got it implicitly from an ascending scan, and that is the only reason the search can be reordered or parallelised at all. The `wide` fixture (40 features) exists specifically to cover `distSqBounded`'s early-abandon branch: the bound is only tested every 8th element, so the three narrower fixtures never take the partial-sum return path that fires on essentially every comparison in production.
@@ -174,7 +174,7 @@ Verified against QuPath 0.7.0:
 
 Implementation facts behind statements in USER_GUIDE.md. If you change one of these behaviours, update the guide too.
 
-- **Classifier is raw-only.** Clustering normalisation (`FeatureNormalizer`) is applied only on the clustering path. Tree models split on rank order and arcsinh/sqrt are strictly increasing, so it would not change predictions anyway. Auto-prune, SHAP and ground-truth export all use raw values.
+- **Classifier is raw-only.** Clustering normalisation (`FeatureNormalizer`) is applied only on the clustering path. Tree models split on rank order and arcsinh/sqrt are strictly increasing, so it would not change predictions anyway. Auto-prune, SHAP and ground-truth export all use raw values. The clustering normaliser is session-only: `SpClassifyExtension.clusteringNormalizer` is never written to `classifier-state.json` (`saveState` sets `featureTransforms`/`arcsinhCofactor` to null and no caller fills them; the load path only reads them from old files), so it is lost on restart and cleared by `resetInMemoryState`. The user guide says so (§11.7).
 - **Auto-prune** (`ClassificationPanel` ~l.940-1006): runs only when more than 20 features are selected and at least 10 rows are available. Rows = labelled cells of the open image (batch shifts applied when batch correction is on) plus `TrainingOrchestrator.poolLabelsFromOtherImages` rows when "Pool labels from all images" is ticked. Imported CSV rows are trained on but excluded from the prune decision (a partial panel would distort variance/correlation). `FeaturePruner.PruneOptions.defaults()` = `(5, 0.95, 1.0, 5)`: min 5 non-zero cells, within-marker |r| > 0.95, cross-marker threshold 1.0 (= disabled, not exposed in the UI), top-5 highest-variance features per group always kept. The prune group key (`extractGroup`: prefix before `": "`, else token before the first `_`/space, lower-cased) is deliberately separate from the `FeatureSelectionPane` categories.
 - **Training Metrics / early stopping** need `nRealSamples >= 20` (`DualModelClassifier` ~l.345, 379, 599).
 - **Review sampling tier 3 ("preferred confusions") is unreachable from the UI**: both `UncertaintySampler.sample` call sites pass `List.of()` for the preferences. Tier 0 groups by image. Budgets scale as `max(1, round(base × sampleSize / 256))`; the sampling dialog defaults to 200.

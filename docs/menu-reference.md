@@ -9,7 +9,7 @@ All under *Extensions → SP Classify*, in menu order.
 | Class Control... | Project | Add, delete, merge and undo-merge classes. |
 | Channel Mapping (Review Display)... | Open image | Sets which image channels review shows for each class. Saved per project, with CSV import and export. See [Marker table format](marker-table.md). |
 | Select Features... | Project | Choose which measurement columns are used for training. |
-| Clustering Normalisation | Project | Sets an arcsinh or square-root transform per feature, with a shared cofactor, for clustering only. The classifier uses raw values. See §[4.2](setup.md#42-clustering-normalisation). |
+| Clustering Normalisation | Project | Sets an arcsinh or square-root transform per feature, with a shared cofactor, for clustering only. The classifier uses raw values. See §[11.7](scatter-clustering.md#117-clustering-normalisation). |
 | Project Prediction Summary... | Project | Cohort QC: anomaly score and flags for each image. See §[8](prediction-summary.md). |
 | Intensity Heatmaps... | Open image with detections | Heatmap of mean marker intensity per class (z-score colours), for one image or the whole project. PNG and CSV export. See §[9](intensity-heatmaps.md). |
 | Image Pixel Prescreen... | Project | Whole-image QC without cells: per-channel pixel statistics compared across the project, with flags for background-heavy, saturated, weak-signal and intensity-outlier images. CSV export. See §[17](pixel-prescreen.md). |

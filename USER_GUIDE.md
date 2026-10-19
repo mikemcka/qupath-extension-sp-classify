@@ -21,9 +21,8 @@ If a window opens with buttons cut off, drag its corner to make it larger. The c
 3. [Quick start — binary + composite workflow](#3-quick-start--binary--composite-workflow)
 4. [Setup steps (shared by both workflows)](#4-setup-steps-shared-by-both-workflows)
    - [4.1 Select features](#41-select-features)
-   - [4.2 Clustering normalisation](#42-clustering-normalisation)
-   - [4.3 Create classes & Class Control](#43-create-classes--class-control)
-   - [4.4 Channel mapping for review (marker table)](#44-channel-mapping-for-review-marker-table)
+   - [4.2 Create classes & Class Control](#42-create-classes--class-control)
+   - [4.3 Channel mapping for review (marker table)](#43-channel-mapping-for-review-marker-table)
 5. [Multi-class workflow in detail](#5-multi-class-workflow-in-detail)
 6. [Binary + composite workflow in detail](#6-binary--composite-workflow-in-detail)
 7. [After training — Review mode](#7-after-training--review-mode)
@@ -37,6 +36,7 @@ If a window opens with buttons cut off, drag its corner to make it larger. The c
     - [11.4 Cluster-within-clusters (hierarchical gating)](#114-cluster-within-clusters-hierarchical-gating)
     - [11.5 Project-wide clustering across images](#115-project-wide-clustering-across-images)
     - [11.6 Clustering method: k-means vs Leiden](#116-clustering-method-k-means-vs-leiden)
+    - [11.7 Clustering normalisation](#117-clustering-normalisation)
 12. [Exporting results](#12-exporting-results)
     - [12.1 Cell table export](#121-cell-table-export)
     - [12.2 Ground truth export & import](#122-ground-truth-export--import)
@@ -94,7 +94,7 @@ To turn the extension off, go to **Edit → Preferences → SP Classify** and un
 Build one classifier that distinguishes any number of cell types (e.g. T-cell / B-cell / Macrophage / Tumour / Stroma).
 
 ```
-Select Features  →  Clustering Normalisation  →  Create classes (Class Control)
+Select Features  →  Create classes (Class Control)
        ↓
 Channel Mapping (optional, for auto channel switching)
        ↓
@@ -126,7 +126,7 @@ Each step is described in §[4](#4-setup-steps-shared-by-both-workflows), §[5](
 Build one **positive/negative classifier per marker** (CD3, CD4, CD8, CD20…), then combine them into composite cell types (`CD3+:CD4+:CD8-`, etc.).
 
 ```
-Select Features  →  Clustering Normalisation
+Select Features
        ↓
 Extensions → SP Classify → Binary Classifiers... → Create... (name it CD3)
 → Open (enters Binary Mode)
@@ -174,7 +174,7 @@ There is one group per **marker** (the text before the first `: `, e.g. `DAPI_AF
 - **Embeddings** — dimensionality-reduction and embedding columns: UMAP, PCA, t-SNE, and `*_emb_*` names (e.g. `kronos_emb_0`).
 - **Other / Uncategorized** — features that fit none of the groups above.
 
-![Feature selection](doc_images/feature_selection.png)
+![Select Features for Training](doc_images/select_features.png)
 
 **Do you need to remove features by hand?** Usually not. Extra or near-duplicate features rarely lower accuracy with the default models, but they make training slower and split a marker's importance across several columns in the feature-importance plot. Leave **Auto-prune features** ticked to remove them automatically.
 
@@ -189,39 +189,8 @@ There is one group per **marker** (the text before the first `: `, e.g. `DAPI_AF
 
 Your selection is saved in `<project>/celltune/classifier-state.json` and is kept between QuPath sessions.
 
-### 4.2 Clustering normalisation
 
-**Menu:** *Extensions → SP Classify → Clustering Normalisation*
-
-These transforms are used only by clustering, the scatter plot and gating (§[11](#11-cell-scatter-plot--clustering--gating)). The classifier always uses raw values. The window has a **Filter:** search box, a prefix dropdown with **Select Prefix** / **Clear Prefix**, **Select All** / **Clear All**, and:
-
-- **Transform:** dropdown:
-  - **arcsinh** — `arcsinh(x / cofactor)`. Recommended. Set **Cofactor:** (default 1.0) for your data, or click **Suggest…** to open a tool that estimates a cofactor from the background level of features you choose.
-    - Raw fluorescence (COMET, CODEX, IF; values in the hundreds to thousands): 25–50.
-    - MIBI: 0.05 (Hartmann et al. 2021; see [References](README.md#references)).
-    - Choose a value near the boundary between background and positive signal. If almost all raw values are below the cofactor, the transform changes very little. If almost all are far above it, low-intensity differences are lost.
-  - **sqrt** — `sqrt(max(0, x))`. No cofactor.
-
-![Clustering normalisation](doc_images/normalise_features.png)
-
-The one transform and cofactor apply to every ticked feature. Unticked features stay raw. Do not tick morphology features (e.g. Cell Area) or features that are already normalised (e.g. foundation-model embeddings).
-
-**Why use it.** Clustering compares cells by distance across all markers. Without a transform, a few very bright markers decide most of the result. arcsinh reduces the effect of bright outliers and keeps differences between dim cells.
-
-**What it does not do.** It does not change the classifier, auto-prune, feature importance or ground-truth export, which all use raw values. It does not correct differences in staining or exposure between slides, because the same transform is applied to every image. For that, use batch normalisation (§[19](#19-batch-normalisation-uniform)) and label cells on several different slides.
-
-**What clustering does automatically.** The transform in this window is optional. Every clustering run also:
-
-1. z-scores each marker (subtracts the mean and divides by the standard deviation), and
-2. applies PCA when more than 50 markers are selected and **Reduce dims (PCA)** in the scatter plot is ticked (default: ticked).
-
-```
-(optional arcsinh / sqrt)  →  z-score each marker  →  (PCA if > 50 markers)  →  k-means / Leiden
-```
-
-If you set no transform here, clustering runs on z-scored raw values. arcsinh adds one thing z-scoring cannot: it reduces extreme high values within a marker.
-
-### 4.3 Create classes & Class Control
+### 4.2 Create classes & Class Control
 
 **Menu:** *Extensions → SP Classify → Class Control...*
 
@@ -243,7 +212,7 @@ Type a class name and click **Add Class**. This adds the class to QuPath's class
 - Pick a class that was a merge target. The list shows classes found in `-mergedInto(...)` labels.
 - **Undo Merge for Selected Class** — restores each label to its original name and adds the original class back to the class list. The target class is **not** deleted. Remove it from the **Delete** tab if you no longer need it.
 
-### 4.4 Channel mapping for review (marker table)
+### 4.3 Channel mapping for review (marker table)
 
 Optional. The **channel mapping** lists which image channels to show for each class. In [Review Mode](#7-after-training--review-mode), the viewer then shows only those channels for the current cell. For example, for a cell predicted as `CD4T` it shows CD4 and CD3. (The CSV file version is called a marker table in the **Import** menu.)
 
@@ -633,13 +602,13 @@ The toolbar header also shows the names of any annotations containing the curren
 
 When you open a different image, its saved predictions are loaded. If it has none, the trained classifier is applied to it when you enter review mode, so you do not need a separate prediction step. Saved predictions made with a different class list are ignored. An image that lacks a measurement the classifier was trained on is not classified, and a warning is shown.
 
-**Channel display.** If you have set up a channel mapping (§[4.4](#44-channel-mapping-for-review-marker-table)):
+**Channel display.** If you have set up a channel mapping (§[4.3](#43-channel-mapping-for-review-marker-table)):
 - Tick **Auto-select channels during review** to show only the channels mapped to the current cell's predicted class.
 - Tick **Auto-adjust brightness/contrast of shown channels** (off by default) to also set each shown channel's display range for each cell. Leave it unticked to keep your own brightness/contrast settings.
 
 Both checkboxes keep their setting after you close review mode or restart QuPath.
 
-**Edit channel mapping…** (below the checkboxes) opens the [Channel Mapping editor](#44-channel-mapping-for-review-marker-table). You can keep reviewing while it is open. When you save in the editor, the current cell's channels update immediately.
+**Edit channel mapping…** (below the checkboxes) opens the [Channel Mapping editor](#43-channel-mapping-for-review-marker-table). You can keep reviewing while it is open. When you save in the editor, the current cell's channels update immediately.
 
 The status line below it shows what is displayed for the current cell:
 
@@ -794,7 +763,7 @@ Scatter Plot* dialog. The window then loads the open image's cells (up to the
 cluster."* Click **Recompute** to cluster and draw the plot.
 
 > Clustering uses the normalisation set in **Clustering Normalisation**
-> (§[4.2](#42-clustering-normalisation)). The classifier always uses raw values. Each
+> (§[11.7](#117-clustering-normalisation)). The classifier always uses raw values. Each
 > marker is then z-scored over the cells being clustered. If you change the normalisation
 > while a plot exists, reopening the plot from the menu asks whether to build a new plot
 > with the new normalisation (the current clusters are discarded) or keep the existing
@@ -911,7 +880,7 @@ the name. In the dropdown, pick an existing class, type a new class name, or cho
 **— skip —**.
 
 To edit classes without closing the dialog, click **Manage Classes…** to open
-[Class Control](#43-create-classes--class-control) (add, delete, merge), then click
+[Class Control](#42-create-classes--class-control) (add, delete, merge), then click
 **Refresh classes** to reload the class list into every dropdown. A class name typed
 into a dropdown is created when you assign.
 
@@ -1090,6 +1059,42 @@ and cannot be changed in this version.
 - **Leiden, Cluster all cells:** all cells are clustered together, so no assignment
   step is needed (§[11.5](#115-project-wide-clustering-across-images)).
 
+### 11.7 Clustering normalisation
+
+**Menu:** *Extensions → SP Classify → Clustering Normalisation*
+
+These transforms are used only by clustering, the scatter plot and gating in this section. The classifier does not use them: it always trains and predicts on raw values.
+
+The window has a **Filter:** search box, a prefix dropdown with **Select Prefix** / **Clear Prefix**, **Select All** / **Clear All**, and:
+
+- **Transform:** dropdown:
+  - **arcsinh** — `arcsinh(x / cofactor)`. Recommended. Set **Cofactor:** (default 1.0) for your data, or click **Suggest…** to open a tool that estimates a cofactor from the background level of features you choose.
+    - Raw fluorescence (COMET, CODEX, IF; values in the hundreds to thousands): 25–50.
+    - MIBI: 0.05 (Hartmann et al. 2021; see [References](README.md#references)).
+    - Choose a value near the boundary between background and positive signal. If almost all raw values are below the cofactor, the transform changes very little. If almost all are far above it, low-intensity differences are lost.
+  - **sqrt** — `sqrt(max(0, x))`. No cofactor.
+
+![Clustering normalisation](doc_images/clustering_normalisation.png)
+
+The one transform and cofactor apply to every ticked feature. Unticked features stay raw. Do not tick morphology features (e.g. Cell Area) or features that are already normalised (e.g. foundation-model embeddings).
+
+**Why use it.** Clustering compares cells by distance across all markers. Without a transform, a few very bright markers decide most of the result. arcsinh reduces the effect of bright outliers and keeps differences between dim cells.
+
+**What it does not do.** It does not change the classifier, auto-prune, feature importance or ground-truth export, which all use raw values. It does not correct differences in staining or exposure between slides, because the same transform is applied to every image. For that, use batch normalisation (§[19](#19-batch-normalisation-uniform)).
+
+**What clustering does automatically.** The transform in this window is optional. Every clustering run also:
+
+1. z-scores each marker (subtracts the mean and divides by the standard deviation), and
+2. applies PCA when more than 50 markers are selected and **Reduce dims (PCA)** in the scatter plot is ticked (default: ticked).
+
+```
+(optional arcsinh / sqrt)  →  z-score each marker  →  (PCA if > 50 markers)  →  k-means / Leiden
+```
+
+If you set no transform here, clustering runs on z-scored raw values. arcsinh adds one thing z-scoring cannot: it reduces extreme high values within a marker.
+
+**Not saved with the project.** The setting is kept only while QuPath is open. It is not written to the project, so after you restart QuPath you must set it again. *Reset Project State* also clears it.
+
 ---
 
 ## 12. Exporting results
@@ -1189,7 +1194,7 @@ Exports annotations from the **current image** as OME-TIFFs. Pixels outside each
 
 > ⚠️ **Destructive.** Deletes everything the extension has saved for this project. Use it to start again, e.g. after **copying a project** to try different classifier settings: the `celltune/` folder is copied with the project.
 
-Deletes the project's `celltune/` folder: all labels and per-image label files, trained classifiers (multi-class **and** binary) and predictions, feature selection, normalisation, marker table, composite rules, and sampling/review state. It also resets the current session so the old state is not saved again.
+Deletes the project's `celltune/` folder: all labels and per-image label files, trained classifiers (multi-class **and** binary) and predictions, feature selection, marker table, composite rules, and sampling/review state. It also resets the current session, including the **Clustering Normalisation** setting, so the old state is not saved again.
 
 **Backup:** before deleting, the extension writes `celltune_backup_<timestamp>.zip` to the project folder. To undo the reset, unzip it into the project folder. This recreates `celltune/`. To confirm the reset, type `RESET`.
 
@@ -1255,9 +1260,9 @@ All under *Extensions → SP Classify*, in menu order.
 | Binary Classifiers... | Project | Opens the binary classifier manager: create, open or delete one classifier per marker. |
 | Composite Classification... | Project + ≥1 trained binary classifier | Applies trained binary classifiers and assigns composite labels. |
 | Class Control... | Project | Add, delete, merge and undo-merge classes. |
-| Channel Mapping (Review Display)... | Open image | Sets which image channels review shows for each class. Saved per project, with CSV import and export. See [§4.4](#44-channel-mapping-for-review-marker-table). |
+| Channel Mapping (Review Display)... | Open image | Sets which image channels review shows for each class. Saved per project, with CSV import and export. See [§4.3](#43-channel-mapping-for-review-marker-table). |
 | Select Features... | Project | Choose which measurement columns are used for training. |
-| Clustering Normalisation | Project | Sets an arcsinh or square-root transform per feature, with a shared cofactor, for clustering only. The classifier uses raw values. See §[4.2](#42-clustering-normalisation). |
+| Clustering Normalisation | Project | Sets an arcsinh or square-root transform per feature, with a shared cofactor, for clustering only. The classifier uses raw values. See §[11.7](#117-clustering-normalisation). |
 | Project Prediction Summary... | Project | Cohort QC: anomaly score and flags for each image. See §[8](#8-project-prediction-summary). |
 | Intensity Heatmaps... | Open image with detections | Heatmap of mean marker intensity per class (z-score colours), for one image or the whole project. PNG and CSV export. See §[9](#9-intensity-heatmaps). |
 | Image Pixel Prescreen... | Project | Whole-image QC without cells: per-channel pixel statistics compared across the project, with flags for background-heavy, saturated, weak-signal and intensity-outlier images. CSV export. See §[17](#17-image-pixel-prescreen-whole-image-qc-no-cells-needed). |
@@ -1268,7 +1273,7 @@ All under *Extensions → SP Classify*, in menu order.
 | Export → Cell Table... | Open image with detections | One CSV per selected image. See §[12.1](#121-cell-table-export). |
 | Export → Ground Truth... | Open image with labels (multi-class) | CSV of labels and feature values that you can import into another project. |
 | Export → Active Binary Ground Truth... | Binary mode active + open image with labels | As above, for the active marker only. |
-| Import → Marker Table... | Open image | Loads a cell type → markers CSV used to switch channels during review. The Channel Mapping editor ([§4.4](#44-channel-mapping-for-review-marker-table)) is the recommended way to edit it. |
+| Import → Marker Table... | Open image | Loads a cell type → markers CSV used to switch channels during review. The Channel Mapping editor ([§4.3](#43-channel-mapping-for-review-marker-table)) is the recommended way to edit it. |
 | Import → Ground Truth... | Open image (multi-class) | Imports labels by spatial match, or as training data only. |
 | Import → Active Binary Ground Truth... | Binary mode active + open image | As above, for the active marker only. |
 | Utility Scripts → Filter Cells by Size & Circularity... | Open image with cells | Removes cells outside optional area and circularity limits, in the current image. See §[13.1](#131-filter-cells-by-size--circularity). |
@@ -1288,9 +1293,9 @@ Everything the extension writes is under `<project>/celltune/`:
 
 ```
 celltune/
-├── classifier-state.json         # Multi-class model (features, classes, models, labels, normalisation)
+├── classifier-state.json         # Multi-class model (features, classes, models, labels)
 ├── composite-rules.json          # Saved composite classification rules
-├── marker-table.json             # Channel mapping for review (§4.4)
+├── marker-table.json             # Channel mapping for review (§4.3)
 ├── binary-registry.json          # List of binary classifiers and their state files
 ├── batch-shifts.json             # Batch normalisation fit (§19)
 ├── pixel-prescreen.json          # Image pixel prescreen results (§17)
@@ -1394,6 +1399,10 @@ The **review pane** below the table explains the result for the selected image, 
 > Suggested action: review / consider removing — little tissue.
 
 This is followed by a table for each channel (median | p99 | foreground% | dyn.range | sat% | focus).
+
+The image below is flagged **Background-heavy**: tissue covers a few small areas and the rest of the image is empty.
+
+![Example of a Background-heavy image](doc_images/prescreen_image_example.png)
 
 **Buttons:**
 - **Open Selected Image** opens the image without saving the current one.
@@ -1555,7 +1564,7 @@ Open it from *Extensions → SP Classify → Batch Normalisation...*.
 ### 19.1 When to use it
 
 - You cluster or train across images stained in different runs, and clusters or classes follow the slide rather than the biology.
-- Clustering normalisation (§[4.2](#42-clustering-normalisation)) applies the same transform to every image, so it cannot remove differences between slides. Batch normalisation corrects each image separately. You do not need it for a single image.
+- Clustering normalisation (§[11.7](#117-clustering-normalisation)) applies the same transform to every image, so it cannot remove differences between slides. Batch normalisation corrects each image separately. You do not need it for a single image.
 
 ### 19.2 Fitting — step by step
 
@@ -1601,7 +1610,7 @@ There are two separate options:
 - **Images at once is limited to 8.** Each image needs about 2–4 GB of memory on COMET data. This setting is separate from **CPU threads** — see §5.3.
 - **If training is slow, check the log.** Each run's log (`<project>/celltune/logs/training-<timestamp>.log`, last 20 kept) ends with a "Where the time went" table showing how long each step took.
 - **Channel mapping is saved per project** in `celltune/marker-table.json` and reloads when you reopen the project. To use it in another project, click **Export CSV…** in *Channel Mapping (Review Display)...* and import that CSV there. *Reset Project State* deletes it with the rest of `celltune/`.
-- **Fixing a CSV that picks the wrong channels.** Open *Channel Mapping (Review Display)...*, click **Import CSV…**, find rows marked `~`, `!` or `✗`, correct the ticks, click **Pin all matches**, then **Save**. Details in [§4.4](#44-channel-mapping-for-review-marker-table).
+- **Fixing a CSV that picks the wrong channels.** Open *Channel Mapping (Review Display)...*, click **Import CSV…**, find rows marked `~`, `!` or `✗`, correct the ticks, click **Pin all matches**, then **Save**. Details in [§4.3](#43-channel-mapping-for-review-marker-table).
 - **Project Prediction Summary needs at least 5 images** for reliable robust z-scores. With 2–3 images, use the Anomaly column only as a rough guide.
 - **Composite class colours.** Without **Prepend current primary classification (colour follows primary)**, QuPath creates a colour for each composite name, which can mean hundreds of colours. Tick it to keep your existing class colours.
 - **Opening an image from Project Prediction Summary does not save the current image.** Save it yourself (Ctrl+S) before you switch if you have edited it.

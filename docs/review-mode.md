@@ -41,7 +41,7 @@ The toolbar header also shows the names of any annotations containing the curren
 
 When you open a different image, its saved predictions are loaded. If it has none, the trained classifier is applied to it when you enter review mode, so you do not need a separate prediction step. Saved predictions made with a different class list are ignored. An image that lacks a measurement the classifier was trained on is not classified, and a warning is shown.
 
-**Channel display.** If you have set up a channel mapping (§[4.4](setup.md#44-channel-mapping-for-review-marker-table)):
+**Channel display.** If you have set up a channel mapping (§[4.3](setup.md#43-channel-mapping-for-review-marker-table)):
 - Tick **Auto-select channels during review** to show only the channels mapped to the current cell's predicted class.
 - Tick **Auto-adjust brightness/contrast of shown channels** (off by default) to also set each shown channel's display range for each cell. Leave it unticked to keep your own brightness/contrast settings.
 

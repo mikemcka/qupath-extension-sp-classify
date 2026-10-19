@@ -12,7 +12,7 @@ Scatter Plot* dialog. The window then loads the open image's cells (up to the
 cluster."* Click **Recompute** to cluster and draw the plot.
 
 > Clustering uses the normalisation set in **Clustering Normalisation**
-> (§[4.2](setup.md#42-clustering-normalisation)). The classifier always uses raw values. Each
+> (§[11.7](#117-clustering-normalisation)). The classifier always uses raw values. Each
 > marker is then z-scored over the cells being clustered. If you change the normalisation
 > while a plot exists, reopening the plot from the menu asks whether to build a new plot
 > with the new normalisation (the current clusters are discarded) or keep the existing
@@ -129,7 +129,7 @@ the name. In the dropdown, pick an existing class, type a new class name, or cho
 **— skip —**.
 
 To edit classes without closing the dialog, click **Manage Classes…** to open
-[Class Control](setup.md#43-create-classes--class-control) (add, delete, merge), then click
+[Class Control](setup.md#42-create-classes--class-control) (add, delete, merge), then click
 **Refresh classes** to reload the class list into every dropdown. A class name typed
 into a dropdown is created when you assign.
 
@@ -308,4 +308,38 @@ and cannot be changed in this version.
 - **Leiden, Cluster all cells:** all cells are clustered together, so no assignment
   step is needed (§[11.5](#115-project-wide-clustering-across-images)).
 
----
+### 11.7 Clustering normalisation
+
+**Menu:** *Extensions → SP Classify → Clustering Normalisation*
+
+These transforms are used only by clustering, the scatter plot and gating in this section. The classifier does not use them: it always trains and predicts on raw values.
+
+The window has a **Filter:** search box, a prefix dropdown with **Select Prefix** / **Clear Prefix**, **Select All** / **Clear All**, and:
+
+- **Transform:** dropdown:
+  - **arcsinh** — `arcsinh(x / cofactor)`. Recommended. Set **Cofactor:** (default 1.0) for your data, or click **Suggest…** to open a tool that estimates a cofactor from the background level of features you choose.
+    - Raw fluorescence (COMET, CODEX, IF; values in the hundreds to thousands): 25–50.
+    - MIBI: 0.05 (Hartmann et al. 2021; see [References](how-to-cite.md)).
+    - Choose a value near the boundary between background and positive signal. If almost all raw values are below the cofactor, the transform changes very little. If almost all are far above it, low-intensity differences are lost.
+  - **sqrt** — `sqrt(max(0, x))`. No cofactor.
+
+![Clustering normalisation](doc_images/clustering_normalisation.png)
+
+The one transform and cofactor apply to every ticked feature. Unticked features stay raw. Do not tick morphology features (e.g. Cell Area) or features that are already normalised (e.g. foundation-model embeddings).
+
+**Why use it.** Clustering compares cells by distance across all markers. Without a transform, a few very bright markers decide most of the result. arcsinh reduces the effect of bright outliers and keeps differences between dim cells.
+
+**What it does not do.** It does not change the classifier, auto-prune, feature importance or ground-truth export, which all use raw values. It does not correct differences in staining or exposure between slides, because the same transform is applied to every image. For that, use batch normalisation (§[19](batch-normalisation.md)).
+
+**What clustering does automatically.** The transform in this window is optional. Every clustering run also:
+
+1. z-scores each marker (subtracts the mean and divides by the standard deviation), and
+2. applies PCA when more than 50 markers are selected and **Reduce dims (PCA)** in the scatter plot is ticked (default: ticked).
+
+```
+(optional arcsinh / sqrt)  →  z-score each marker  →  (PCA if > 50 markers)  →  k-means / Leiden
+```
+
+If you set no transform here, clustering runs on z-scored raw values. arcsinh adds one thing z-scoring cannot: it reduces extreme high values within a marker.
+
+**Not saved with the project.** The setting is kept only while QuPath is open. It is not written to the project, so after you restart QuPath you must set it again. *Reset Project State* also clears it.

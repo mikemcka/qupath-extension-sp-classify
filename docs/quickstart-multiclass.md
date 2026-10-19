@@ -3,7 +3,7 @@
 Build one classifier that distinguishes any number of cell types (e.g. T-cell / B-cell / Macrophage / Tumour / Stroma).
 
 ```
-Select Features  →  Clustering Normalisation  →  Create classes (Class Control)
+Select Features  →  Create classes (Class Control)
        ↓
 Channel Mapping (optional, for auto channel switching)
        ↓

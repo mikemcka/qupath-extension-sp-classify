@@ -9,7 +9,7 @@ Open it from *Extensions → SP Classify → Batch Normalisation...*.
 ### 19.1 When to use it
 
 - You cluster or train across images stained in different runs, and clusters or classes follow the slide rather than the biology.
-- Clustering normalisation (§[4.2](setup.md#42-clustering-normalisation)) applies the same transform to every image, so it cannot remove differences between slides. Batch normalisation corrects each image separately. You do not need it for a single image.
+- Clustering normalisation (§[11.7](scatter-clustering.md#117-clustering-normalisation)) applies the same transform to every image, so it cannot remove differences between slides. Batch normalisation corrects each image separately. You do not need it for a single image.
 
 ### 19.2 Fitting — step by step
 
