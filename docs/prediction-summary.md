@@ -4,11 +4,13 @@
 
 **Menu:** *Extensions → SP Classify → Project Prediction Summary...*
 
-Shows one row per project image, using the saved predictions in `<project>/celltune/image-predictions/`, and gives each image an anomaly score so you can find the images to check first. See [How the anomaly score is calculated](#anatomy-of-the-anomaly-score). In binary mode it reads `<project>/celltune/binary-image-predictions/<marker>/`. An image whose saved predictions were made with a different class list shows `Predictions made with a different class list. Apply the classifier to this image again.` and gets no anomaly score.
+Shows one row per project image, using the saved predictions in `<project>/celltune/image-predictions/`, and gives each image an anomaly score so you can find the images to check first. Only the counts are read from each predictions file (cells per class and disagreements), up to 4 files at a time, so large projects do not need much memory. See [How the anomaly score is calculated](#anatomy-of-the-anomaly-score). In binary mode it reads `<project>/celltune/binary-image-predictions/<marker>/`. An image whose saved predictions were made with a different class list shows `Predictions made with a different class list. Apply the classifier to this image again.` and gets no anomaly score. An image whose predictions file cannot be read (for example, a damaged file) shows `Saved predictions could not be read (see log).`; the other images are still shown.
+
+The counts are saved to `<project>/celltune/prediction-summary-cache.json`. When the summary is opened again, also after restarting QuPath, only predictions files that changed since then (different size or modification time) are read again. If the summary window is already open, it is updated in place and keeps its filters.
 
 > To check images before cell segmentation, using pixel values only, see §[17 Image pixel prescreen](pixel-prescreen.md).
 
-**Table columns:** Image, Predicted, Agreements, Disagreements, Agreement %, Anomaly, Flagged.
+**Table columns:** Image, Predicted, Agreements, Disagreements, Agreement %, Anomaly, Flagged. All number columns, including Agreement %, sort by value.
 
 **Filters:**
 - **Flagged only**: hide images that have no flag.
