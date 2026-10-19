@@ -4,15 +4,17 @@
 
 **Menu:** *Extensions → SP Classify → Project Prediction Summary...*
 
-Shows one row per project image, using the saved predictions in `<project>/celltune/image-predictions/`, and gives each image an anomaly score so you can find the images to check first. See [How the anomaly score is calculated](#anatomy-of-the-anomaly-score). In binary mode it reads `<project>/celltune/binary-image-predictions/<marker>/`. An image whose saved predictions were made with a different class list shows `Predictions made with a different class list. Apply the classifier to this image again.` and gets no anomaly score.
+Shows one row per project image, using the saved predictions in `<project>/celltune/image-predictions/`, and gives each image an anomaly score so you can find the images to check first. Only the counts are read from each predictions file (cells per class and disagreements), up to 4 files at a time, so large projects do not need much memory. See [How the anomaly score is calculated](#anatomy-of-the-anomaly-score). In binary mode it reads `<project>/celltune/binary-image-predictions/<marker>/`. An image whose saved predictions were made with a different class list shows `Predictions made with a different class list. Apply the classifier to this image again.` and gets no anomaly score. An image whose predictions file cannot be read (for example, a damaged file) shows `Saved predictions could not be read (see log).`; the other images are still shown.
+
+The counts are saved to `<project>/celltune/prediction-summary-cache.json`. When the summary is opened again, also after restarting QuPath, only predictions files that changed since then (different size or modification time) are read again. If the summary window is already open, it is updated in place and keeps its filters.
 
 > To check images before cell segmentation, using pixel values only, see §[17 Image pixel prescreen](pixel-prescreen.md).
 
-**Table columns:** Image, Predicted, Agreements, Disagreements, Agreement %, Anomaly, Flagged.
+**Table columns:** Image, Predicted, Agreements, Disagreements, Agreement %, Anomaly, Flagged. All number columns, including Agreement %, sort by value.
 
 **Filters:**
 - **Flagged only**: hide images that have no flag.
-- **Target class:** show only images where the chosen class has the `RARE_ENRICHMENT` flag. The list contains only classes that have this flag in at least one image. Default: **All classes**.
+- **Target class:** show only images where the chosen class has the `RARE_ENRICHMENT` flag. The details pane shows each flagged class as `count`, how many times the median image's fraction it is, and its z-score. The list contains only classes that have this flag in at least one image. Default: **All classes**.
 - **Threshold preset:** hide unflagged images whose anomaly score is below the preset: `strict` 1.5, `balanced` 0.5, `sensitive` 0.0 (default; shows every image). Flagged images are always shown. The analysis is not re-run.
 
 **Buttons:**
@@ -37,9 +39,9 @@ For each image:
 Composition has the larger weight because the disagreement rate partly depends on which two model types you chose. Use the score to rank images. It is not a probability.
 
 **Flag reasons:**
-- `RARE_ENRICHMENT`: a class that is under 1% of all cells in the project has at least 20 cells in this image and is at least 3× more common here than in the whole project.
+- `RARE_ENRICHMENT`: a class that is at most 1% of all cells in the project has at least 20 cells in this image, and its fraction in this image is far above its fraction in the other images. "Far above" means a robust z-score ≥ 3 of `log((cells of the class + 0.5) / (cells in the image + 1))` across images. The MAD used for this z-score is at least `0.6745 × ln(3) / 3` (0.247), so the flag also always needs at least 3× the class fraction of the median image. Rare classes are often absent from many images and clustered in others, so being several times the project average is common and is not flagged on its own.
 - `COMPOSITION_OUTLIER`: composition z-score ≥ 3.
-- `HIGH_DISAGREEMENT`: disagreement z-score ≥ 3.
+- `HIGH_DISAGREEMENT`: disagreement z-score ≥ 3, and at least 200 predicted cells in the image. With fewer cells the disagreement rate varies too much by chance (a typical image with 20–50 cells can reach a z-score of +4 to +9). These images still get an anomaly score.
 
 **How to use it:**
 - Sort by **Anomaly** (the default sort). Check the top rows first.

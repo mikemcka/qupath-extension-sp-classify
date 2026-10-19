@@ -33,6 +33,7 @@ import javafx.stage.Stage;
 import qupath.ext.spclassify.io.ProjectSummaryCsvExporter;
 import qupath.fx.dialogs.Dialogs;
 import qupath.lib.gui.QuPathGUI;
+import qupath.lib.projects.Project;
 import qupath.lib.projects.ProjectImageEntry;
 
 /**
@@ -47,7 +48,7 @@ public class ProjectPredictionSummaryView {
             long predictedCells,
             long agreements,
             long disagreements,
-            String agreementRate,
+            double agreementPercent,
             double anomalyScore,
             boolean flagged,
             String flagReasons,
@@ -57,12 +58,40 @@ public class ProjectPredictionSummaryView {
 
         public Row {
             imageName = imageName == null ? "" : imageName;
-            agreementRate = agreementRate == null ? "-" : agreementRate;
             flagReasons = flagReasons == null ? "-" : flagReasons;
             rareEnrichmentText = rareEnrichmentText == null ? "No highlighted rare classes." : rareEnrichmentText;
             highlightedRareClasses = highlightedRareClasses == null ? List.of() : List.copyOf(highlightedRareClasses);
             classCountsText = classCountsText == null ? "No predicted classes." : classCountsText;
         }
+
+        /** @return agreement as text, e.g. {@code 95.0%}, or {@code -} without predictions */
+        public String agreementText() {
+            return Double.isNaN(agreementPercent) ? "-" : String.format(Locale.ROOT, "%.1f%%", agreementPercent);
+        }
+    }
+
+    /** The open window, reused (with its filters) when the summary is opened again. */
+    private static ProjectPredictionSummaryView current;
+
+    private static Project<?> currentProject;
+
+    /**
+     * Show the summary: refresh the open window for the same project in place, keeping
+     * its filters and selection, or open a new one.
+     */
+    public static void showOrUpdate(QuPathGUI qupath, Project<?> project, List<Row> rows) {
+        if (current != null && currentProject == project) {
+            current.setRows(rows);
+            current.stage.show();
+            current.stage.toFront();
+            return;
+        }
+        if (current != null) {
+            current.stage.close();
+        }
+        current = new ProjectPredictionSummaryView(qupath, qupath.getStage(), rows);
+        currentProject = project;
+        current.show();
     }
 
     private static final String TITLE = "Project Prediction Summary";
@@ -73,7 +102,8 @@ public class ProjectPredictionSummaryView {
 
     private final Stage stage;
     private final QuPathGUI qupath;
-    private final List<Row> rows;
+    private List<Row> rows;
+    private final ObservableList<Row> backingRows;
     private final TableView<Row> table;
     private final FilteredList<Row> filteredRows;
     private final Label summaryLabel;
@@ -86,7 +116,7 @@ public class ProjectPredictionSummaryView {
         this.qupath = qupath;
         this.rows = rows == null ? List.of() : List.copyOf(rows);
 
-        ObservableList<Row> backingRows = FXCollections.observableArrayList(this.rows);
+        backingRows = FXCollections.observableArrayList(this.rows);
         filteredRows = new FilteredList<>(backingRows, row -> true);
         table = new TableView<>(filteredRows);
 
@@ -110,10 +140,23 @@ public class ProjectPredictionSummaryView {
                 cd -> new SimpleObjectProperty<>(cd.getValue().disagreements()));
         disagreementsCol.setStyle("-fx-alignment: CENTER-RIGHT;");
 
-        TableColumn<Row, String> agreementRateCol = new TableColumn<>("Agreement %");
+        TableColumn<Row, Number> agreementRateCol = new TableColumn<>("Agreement %");
+        // Numeric value so the column sorts by number (as text, 9.5% sorted above 10.0%).
         agreementRateCol.setCellValueFactory(
-                cd -> new SimpleStringProperty(cd.getValue().agreementRate()));
+                cd -> new SimpleObjectProperty<>(cd.getValue().agreementPercent()));
         agreementRateCol.setStyle("-fx-alignment: CENTER-RIGHT;");
+        agreementRateCol.setCellFactory(col -> new TableCell<>() {
+            @Override
+            protected void updateItem(Number value, boolean empty) {
+                super.updateItem(value, empty);
+                setText(
+                        empty || value == null
+                                ? null
+                                : Double.isNaN(value.doubleValue())
+                                        ? "-"
+                                        : String.format(Locale.ROOT, "%.1f%%", value.doubleValue()));
+            }
+        });
 
         TableColumn<Row, Number> anomalyCol = new TableColumn<>("Anomaly");
         anomalyCol.setCellValueFactory(
@@ -206,6 +249,27 @@ public class ProjectPredictionSummaryView {
 
     public void show() {
         stage.show();
+    }
+
+    /** Replace the rows, keeping the filters and (if still present) the selected image. */
+    void setRows(List<Row> newRows) {
+        Row selected = table.getSelectionModel().getSelectedItem();
+        rows = newRows == null ? List.of() : List.copyOf(newRows);
+        backingRows.setAll(rows);
+
+        String target = targetClassBox.getValue();
+        var options = buildTargetClassOptions(rows);
+        targetClassBox.getItems().setAll(ALL_CLASSES);
+        targetClassBox.getItems().addAll(options);
+        targetClassBox.setValue(target != null && options.contains(target) ? target : ALL_CLASSES);
+
+        if (selected != null) {
+            rows.stream()
+                    .filter(r -> r.imageName().equals(selected.imageName()))
+                    .findFirst()
+                    .ifPresent(r -> table.getSelectionModel().select(r));
+        }
+        applyFilters();
     }
 
     private void applyFilters() {
@@ -367,7 +431,7 @@ public class ProjectPredictionSummaryView {
                     row.predictedCells(),
                     row.agreements(),
                     row.disagreements(),
-                    row.agreementRate(),
+                    row.agreementText(),
                     row.anomalyScore(),
                     row.flagged(),
                     row.flagReasons(),

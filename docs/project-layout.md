@@ -10,6 +10,7 @@ celltune/
 ├── binary-registry.json          # List of binary classifiers and their state files
 ├── batch-shifts.json             # Batch normalisation fit (§19)
 ├── pixel-prescreen.json          # Image pixel prescreen results (§17)
+├── prediction-summary-cache.json # Project Prediction Summary counts per image (§8)
 ├── labels_backup_YYYYMMDD_HHMMSS.json   # Copy of the labels, saved before each Train
 │
 ├── image-labels/                 # Multi-class labels, one JSON per image

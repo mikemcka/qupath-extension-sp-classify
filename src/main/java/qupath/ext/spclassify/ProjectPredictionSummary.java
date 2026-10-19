@@ -1,17 +1,17 @@
 package qupath.ext.spclassify;
 
 import java.awt.image.BufferedImage;
-import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.ResourceBundle;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import qupath.ext.spclassify.io.ProjectStateManager;
+import qupath.ext.spclassify.io.PredictionCountsCache;
 import qupath.ext.spclassify.model.CohortAnomalyAnalyzer;
 import qupath.ext.spclassify.model.CohortAnomalyReport;
 import qupath.ext.spclassify.model.PopulationSet;
+import qupath.ext.spclassify.model.PredictionCounts;
 import qupath.ext.spclassify.ui.ProjectPredictionSummaryView;
 import qupath.fx.dialogs.Dialogs;
 import qupath.lib.gui.QuPathGUI;
@@ -22,8 +22,10 @@ import qupath.lib.projects.ProjectImageEntry;
  * predictions, computes per-image agreement/disagreement counts and cohort-level anomaly
  * flags, and shows them in a {@link ProjectPredictionSummaryView}.
  * <p>
- * Loading runs in parallel off the FX thread behind a small progress dialog so large
- * projects stay responsive. Lifted verbatim out of {@code SpClassifyExtension} (mirroring the
+ * Loading runs off the FX thread behind a small progress dialog. Saved predictions are
+ * counted by streaming each file (never loading every cell's probabilities), on
+ * {@link #LOAD_THREADS} workers, and the counts are kept in {@link PredictionCountsCache}
+ * so reopening the summary only re-reads files that changed. Lifted verbatim out of {@code SpClassifyExtension} (mirroring the
  * {@code UtilityScripts}/{@code AnnotationRegionExporter} moves); the menu handler delegates
  * here. The only state it needs is the current image's live in-memory predictions, passed in
  * as a parameter — the caller persists them first so they are reflected in the summary.
@@ -77,8 +79,8 @@ final class ProjectPredictionSummary {
             return;
         }
 
-        // ── Show a small progress dialog and load all images in parallel
-        // off the FX thread so the UI stays responsive on large projects.
+        // ── Show a small progress dialog and count all images off the FX thread
+        // so the UI stays responsive on large projects.
         var stage = new javafx.stage.Stage();
         stage.setTitle(EXTENSION_NAME + " — Loading prediction summary");
         stage.initOwner(qupath.getStage());
@@ -97,60 +99,43 @@ final class ProjectPredictionSummary {
 
         Thread t = new Thread(
                 () -> {
-                    int total = imageNames.size();
-                    java.util.concurrent.atomic.AtomicInteger done = new java.util.concurrent.atomic.AtomicInteger();
-
-                    // Parallel JSON load — independent files per image, IO+CPU bound.
-                    List<SummaryInputRow> sourceRows = imageNames.parallelStream()
-                            .map(imageName -> {
-                                PopulationSet predictions = null;
-                                boolean live = false;
-                                if (currentImageNameFinal != null
-                                        && currentImageNameFinal.equals(imageName)
-                                        && liveCurrent != null
-                                        && liveCurrent.size() > 0) {
-                                    predictions = liveCurrent;
-                                    live = true;
-                                } else {
-                                    try {
-                                        predictions =
-                                                ProjectStateManager.loadImagePredictions(project, scope, imageName);
-                                    } catch (IOException ex) {
-                                        logger.warn(
-                                                "Failed to load predictions for {} in project summary: {}",
-                                                imageName,
-                                                ex.getMessage());
+                    List<ProjectPredictionSummaryView.Row> rows = null;
+                    try {
+                        int total = imageNames.size();
+                        var done = new java.util.concurrent.atomic.AtomicInteger();
+                        var cache = PredictionCountsCache.open(project);
+                        var sourceRows = loadInputRows(
+                                imageNames,
+                                name -> {
+                                    // The open image's in-memory predictions come from the loaded model.
+                                    if (name.equals(currentImageNameFinal)
+                                            && liveCurrent != null
+                                            && liveCurrent.size() > 0) {
+                                        return inputRow(name, PredictionCounts.of(liveCurrent), null);
                                     }
-                                }
-                                // The open image's in-memory predictions come from the loaded model.
-                                SummaryInputRow row = inputRow(imageName, predictions, live ? null : classNames);
-                                int c = done.incrementAndGet();
-                                javafx.application.Platform.runLater(() -> {
-                                    bar.setProgress((double) c / total);
-                                    status.setText(String.format("Loading predictions: %d / %d images…", c, total));
+                                    return inputRow(name, cache.get(scope, name), classNames);
+                                },
+                                () -> {
+                                    int c = done.incrementAndGet();
+                                    javafx.application.Platform.runLater(() -> {
+                                        bar.setProgress((double) c / total);
+                                        status.setText(String.format("Loading predictions: %d / %d images…", c, total));
+                                    });
                                 });
-                                return row;
-                            })
-                            .collect(java.util.stream.Collectors.toList());
-
-                    var analyzerInputs = new ArrayList<CohortAnomalyReport.ImageInput>(sourceRows.size());
-                    for (var src : sourceRows) {
-                        if (src.predictedCells() > 0 && src.avgCounts() != null) {
-                            analyzerInputs.add(new CohortAnomalyReport.ImageInput(
-                                    src.imageName(), src.predictedCells(), src.disagreements(), src.avgCounts()));
-                        }
+                        cache.save();
+                        rows = buildRows(sourceRows);
+                    } catch (Throwable ex) {
+                        logger.error("Project prediction summary failed", ex);
                     }
-                    var anomalyReport = CohortAnomalyAnalyzer.analyze(analyzerInputs);
-                    var anomalyByImage = anomalyReport.byImageName();
-
-                    var rows = new ArrayList<ProjectPredictionSummaryView.Row>(sourceRows.size());
-                    for (var source : sourceRows) {
-                        rows.add(buildPredictionSummaryRow(source, anomalyByImage.get(source.imageName())));
-                    }
-
+                    final var rowsF = rows;
+                    // Always close the progress window: it cannot be closed by hand.
                     javafx.application.Platform.runLater(() -> {
                         stage.close();
-                        new ProjectPredictionSummaryView(qupath, qupath.getStage(), rows).show();
+                        if (rowsF == null) {
+                            Dialogs.showErrorMessage(EXTENSION_NAME, "Could not build the project summary (see log).");
+                            return;
+                        }
+                        ProjectPredictionSummaryView.showOrUpdate(qupath, project, rowsF);
                     });
                 },
                 "sp-classify-summary-load");
@@ -158,7 +143,71 @@ final class ProjectPredictionSummary {
         t.start();
     }
 
+    /** Images whose predictions are counted at the same time. */
+    static final int LOAD_THREADS = 4;
+
+    /** Reads one image's input row; may throw. */
+    interface RowLoader {
+        SummaryInputRow load(String imageName) throws Exception;
+    }
+
+    /**
+     * Build one input row per image on {@link #LOAD_THREADS} workers, in image order.
+     * An image whose predictions cannot be read gets a {@link #READ_ERROR} row instead
+     * of stopping the others.
+     */
+    static List<SummaryInputRow> loadInputRows(List<String> imageNames, RowLoader loader, Runnable onImageDone)
+            throws InterruptedException {
+        var pool = qupath.ext.spclassify.util.BackgroundExecutors.newFixedPool(
+                Math.max(1, Math.min(LOAD_THREADS, imageNames.size())), "sp-classify-summary-count");
+        try {
+            var futures = new ArrayList<java.util.concurrent.Future<SummaryInputRow>>(imageNames.size());
+            for (String name : imageNames) {
+                futures.add(pool.submit(() -> {
+                    try {
+                        return loader.load(name);
+                    } finally {
+                        onImageDone.run();
+                    }
+                }));
+            }
+            var out = new ArrayList<SummaryInputRow>(imageNames.size());
+            for (int i = 0; i < imageNames.size(); i++) {
+                try {
+                    out.add(futures.get(i).get());
+                } catch (java.util.concurrent.ExecutionException ex) {
+                    logger.warn(
+                            "Failed to read predictions for {} in project summary: {}",
+                            imageNames.get(i),
+                            String.valueOf(ex.getCause()));
+                    out.add(new SummaryInputRow(imageNames.get(i), 0L, 0L, READ_ERROR, null));
+                }
+            }
+            return out;
+        } finally {
+            pool.shutdownNow();
+        }
+    }
+
+    /** Score the images that have counts against each other and build the table rows. */
+    static List<ProjectPredictionSummaryView.Row> buildRows(List<SummaryInputRow> sourceRows) {
+        var analyzerInputs = new ArrayList<CohortAnomalyReport.ImageInput>(sourceRows.size());
+        for (var src : sourceRows) {
+            if (src.predictedCells() > 0 && src.avgCounts() != null) {
+                analyzerInputs.add(new CohortAnomalyReport.ImageInput(
+                        src.imageName(), src.predictedCells(), src.disagreements(), src.avgCounts()));
+            }
+        }
+        var anomalyByImage = CohortAnomalyAnalyzer.analyze(analyzerInputs).byImageName();
+        var rows = new ArrayList<ProjectPredictionSummaryView.Row>(sourceRows.size());
+        for (var source : sourceRows) {
+            rows.add(buildPredictionSummaryRow(source, anomalyByImage.get(source.imageName())));
+        }
+        return rows;
+    }
+
     static final String NO_PREDICTIONS = "No saved predictions for this image.";
+    static final String READ_ERROR = "Saved predictions could not be read (see log).";
     static final String DIFFERENT_CLASSES =
             "Predictions made with a different class list. Apply the classifier to this image again.";
 
@@ -169,19 +218,20 @@ final class ProjectPredictionSummary {
      * @param classNames the loaded classifier's classes, or null to skip the check
      */
     static SummaryInputRow inputRow(String imageName, PopulationSet predictions, List<String> classNames) {
-        if (predictions == null || predictions.size() == 0) {
+        return inputRow(imageName, PredictionCounts.of(predictions), classNames);
+    }
+
+    /** As above, from counts (see {@link PredictionCounts#of}). */
+    static SummaryInputRow inputRow(String imageName, PredictionCounts counts, List<String> classNames) {
+        if (counts == null || counts.cells() == 0) {
             return new SummaryInputRow(imageName, 0L, 0L, NO_PREDICTIONS, null);
         }
-        if (!ProjectStateManager.predictionsMatchClasses(predictions, classNames)) {
+        if (classNames != null && !classNames.equals(counts.classNames())) {
             return new SummaryInputRow(imageName, 0L, 0L, DIFFERENT_CLASSES, null);
         }
-        Map<String, Long> avgCounts = predictions.getAvgCounts();
+        Map<String, Long> avgCounts = counts.avgCounts();
         return new SummaryInputRow(
-                imageName,
-                predictions.size(),
-                predictions.getDisagreementCount(),
-                formatClassCounts(avgCounts),
-                avgCounts);
+                imageName, counts.cells(), counts.disagreements(), formatClassCounts(avgCounts), avgCounts);
     }
 
     private static ProjectPredictionSummaryView.Row buildPredictionSummaryRow(
@@ -192,7 +242,7 @@ final class ProjectPredictionSummary {
                     0L,
                     0L,
                     0L,
-                    "-",
+                    Double.NaN,
                     0.0,
                     false,
                     "-",
@@ -210,7 +260,7 @@ final class ProjectPredictionSummary {
                     source.predictedCells(),
                     agreements,
                     source.disagreements(),
-                    String.format("%.1f%%", agreementPct),
+                    agreementPct,
                     0.0,
                     false,
                     "-",
@@ -224,7 +274,7 @@ final class ProjectPredictionSummary {
                 source.predictedCells(),
                 agreements,
                 source.disagreements(),
-                String.format("%.1f%%", agreementPct),
+                agreementPct,
                 anomaly.anomalyScore(),
                 anomaly.flagged(),
                 formatFlagReasons(anomaly.flagReasons()),
@@ -268,7 +318,12 @@ final class ProjectPredictionSummary {
                 continue;
             }
             parts.add(String.format(
-                    "%s (count=%d, fold=%.2fx)", className, enrichment.count(), enrichment.enrichmentFold()));
+                    java.util.Locale.ROOT,
+                    "%s (count=%d, %.1fx the typical image, z=%+.1f)",
+                    className,
+                    enrichment.count(),
+                    enrichment.foldVsTypical(),
+                    enrichment.outlierZ()));
         }
         return String.join("; ", parts);
     }

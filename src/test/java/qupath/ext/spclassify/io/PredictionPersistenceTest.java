@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.awt.image.BufferedImage;
@@ -136,6 +137,109 @@ class PredictionPersistenceTest {
         assertNull(ProjectStateManager.loadImagePredictions(project, "CD8", "img.tif"));
         assertEquals(List.of("img.tif"), ProjectStateManager.listImagesWithPredictions(project, "CD3"));
         assertEquals(List.of(), ProjectStateManager.listImagesWithPredictions(project, "CD8"));
+    }
+
+    @Test
+    void streamingCountsEqualLoadedCounts() throws Exception {
+        Project<BufferedImage> project = fakeProject(tempDir.resolve("c/project.qpproj"), List.of());
+        PopulationSet predAll = new PopulationSet("Pred_ALL");
+        var rng = new java.util.Random(5);
+        for (int i = 0; i < 500; i++) {
+            float[] p1 = {rng.nextFloat(), rng.nextFloat(), rng.nextFloat()};
+            float[] p2 = {rng.nextFloat(), rng.nextFloat(), rng.nextFloat()};
+            if (i % 50 == 0) {
+                // A tie between classes: the first index must win, as in avgLabel().
+                p1 = new float[] {0.4f, 0.4f, 0.2f};
+                p2 = new float[] {0.4f, 0.4f, 0.2f};
+            }
+            String l1 = CLASSES.get(rng.nextInt(3));
+            String l2 = rng.nextInt(4) == 0 ? CLASSES.get(rng.nextInt(3)) : l1;
+            predAll.put("cell-" + i, new CellPrediction("cell-" + i, l1, l2, p1, p2, CLASSES));
+        }
+        ProjectStateManager.saveImagePredictions(project, null, "img", predAll);
+
+        var expected = qupath.ext.spclassify.model.PredictionCounts.of(
+                ProjectStateManager.loadImagePredictions(project, null, "img"));
+        var counted = PredictionPersistence.countImagePredictions(project, null, "img");
+        assertEquals(expected, counted);
+        assertEquals(
+                List.copyOf(expected.avgCounts().keySet()),
+                List.copyOf(counted.avgCounts().keySet()));
+    }
+
+    @Test
+    void streamingCountsMatchLoaderOnInvalidAndRepeatedRows() throws Exception {
+        Project<BufferedImage> project = fakeProject(tempDir.resolve("d/project.qpproj"), List.of());
+        Path file = PredictionPersistence.imagePredictionsFile(project, null, "img");
+        Files.createDirectories(file.getParent());
+        // Row 2: wrong probability length (skipped). Row 3: no cell ID (skipped).
+        // Row 4 repeats cell a (replaces row 1, keeps its position). Row 5 has an unknown field.
+        Files.writeString(file, """
+                {"classNames": ["Tumour", "Stroma", "Immune"],
+                 "predictions": [
+                  {"cellId": "a", "model1Label": "Tumour", "model2Label": "Tumour",
+                   "model1Probs": [0.9, 0.05, 0.05], "model2Probs": [0.8, 0.1, 0.1]},
+                  {"cellId": "b", "model1Label": "Tumour", "model2Label": "Stroma",
+                   "model1Probs": [0.9, 0.1], "model2Probs": [0.8, 0.1, 0.1]},
+                  {"model1Label": "Tumour", "model2Label": "Stroma",
+                   "model1Probs": [0.9, 0.05, 0.05], "model2Probs": [0.8, 0.1, 0.1]},
+                  {"cellId": "c", "extra": {"x": [1, 2]}, "model1Label": "Immune", "model2Label": "Stroma",
+                   "model1Probs": [0.1, 0.2, 0.7], "model2Probs": [0.1, 0.6, 0.3]},
+                  {"cellId": "a", "model1Label": "Stroma", "model2Label": "Immune",
+                   "model1Probs": [0.1, 0.6, 0.3], "model2Probs": [0.1, 0.3, 0.6]}
+                 ]}
+                """);
+        var expected = qupath.ext.spclassify.model.PredictionCounts.of(
+                ProjectStateManager.loadImagePredictions(project, null, "img"));
+        var counted = PredictionPersistence.countImagePredictions(project, null, "img");
+        assertEquals(expected, counted);
+        assertEquals(2, counted.cells());
+        assertEquals(2, counted.disagreements());
+    }
+
+    @Test
+    void streamingCountsRejectTruncatedFile() throws Exception {
+        Project<BufferedImage> project = fakeProject(tempDir.resolve("e/project.qpproj"), List.of());
+        Path file = PredictionPersistence.imagePredictionsFile(project, null, "img");
+        Files.createDirectories(file.getParent());
+        Files.writeString(file, "{\"classNames\": [\"A\", \"B\"], \"predictions\": [{\"cellId\": \"a\", \"mod");
+        assertThrows(IOException.class, () -> PredictionPersistence.countImagePredictions(project, null, "img"));
+        assertNull(PredictionPersistence.countImagePredictions(project, null, "missing"));
+    }
+
+    @Test
+    void countsCacheReusesUnchangedFilesAndRecountsChangedOnes() throws Exception {
+        Project<BufferedImage> project = fakeProject(tempDir.resolve("f/project.qpproj"), List.of());
+        PopulationSet one = single("cell-1", "Tumour", new float[] {0.8f, 0.1f, 0.1f}, CLASSES);
+        ProjectStateManager.saveImagePredictions(project, null, "img", one);
+
+        var cache = PredictionCountsCache.open(project);
+        assertEquals(1, cache.get(null, "img").cells());
+        cache.save();
+        Path cacheFile = ProjectStateManager.cellTuneDirPath(project).resolve(PredictionCountsCache.FILENAME);
+        assertTrue(Files.exists(cacheFile));
+
+        // Reopened: same counts from the saved entry.
+        assertEquals(1, PredictionCountsCache.open(project).get(null, "img").cells());
+
+        // The predictions file changes (different size): counted again.
+        PopulationSet two = single("cell-1", "Tumour", new float[] {0.8f, 0.1f, 0.1f}, CLASSES);
+        two.put(
+                "cell-2",
+                new CellPrediction(
+                        "cell-2",
+                        "Stroma",
+                        "Immune",
+                        new float[] {0.1f, 0.6f, 0.3f},
+                        new float[] {0.2f, 0.3f, 0.5f},
+                        CLASSES));
+        ProjectStateManager.saveImagePredictions(project, null, "img", two);
+        var reopened = PredictionCountsCache.open(project);
+        assertEquals(2, reopened.get(null, "img").cells());
+        assertEquals(1, reopened.get(null, "img").disagreements());
+
+        // Binary scope is a separate entry.
+        assertNull(reopened.get("CD3", "img"));
     }
 
     @Test
