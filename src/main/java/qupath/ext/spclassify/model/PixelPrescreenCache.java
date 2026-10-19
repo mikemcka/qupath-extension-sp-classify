@@ -22,9 +22,14 @@ import java.util.Map;
  * @param maxLongEdge  long-edge target in pixels the images were read at
  * @param scannedAt    ISO-8601 time of the most recent scan
  * @param images       per-image statistics; each has a non-null {@code imageId}
+ * @param tissueChannel nuclear channel chosen for tissue fraction, or {@code null} for automatic
  */
 public record PixelPrescreenCache(
-        int statsVersion, int maxLongEdge, String scannedAt, List<ImagePixelStats.ImageStats> images) {
+        int statsVersion,
+        int maxLongEdge,
+        String scannedAt,
+        List<ImagePixelStats.ImageStats> images,
+        String tissueChannel) {
 
     public PixelPrescreenCache {
         var kept = new ArrayList<ImagePixelStats.ImageStats>();
@@ -36,6 +41,17 @@ public record PixelPrescreenCache(
             }
         }
         images = List.copyOf(kept);
+    }
+
+    /** A cache with the automatic tissue channel. */
+    public PixelPrescreenCache(
+            int statsVersion, int maxLongEdge, String scannedAt, List<ImagePixelStats.ImageStats> images) {
+        this(statsVersion, maxLongEdge, scannedAt, images, null);
+    }
+
+    /** @return a copy using {@code channel} for tissue fraction ({@code null} = automatic). */
+    public PixelPrescreenCache withTissueChannel(String channel) {
+        return new PixelPrescreenCache(statsVersion, maxLongEdge, scannedAt, images, channel);
     }
 
     /** @return an empty cache for the current statistic definitions and read size. */
@@ -69,7 +85,8 @@ public record PixelPrescreenCache(
                 }
             }
         }
-        return new PixelPrescreenCache(statsVersion, maxLongEdge, timestamp, new ArrayList<>(byId.values()));
+        return new PixelPrescreenCache(
+                statsVersion, maxLongEdge, timestamp, new ArrayList<>(byId.values()), tissueChannel);
     }
 
     /**

@@ -91,7 +91,20 @@ public final class ImagePixelStatsReader {
         img = null;
         raster = null;
 
-        return ImagePixelStats.compute(imageName, downsample, w, h, channelNames, channelValues, dtypeMax);
+        // Pixel size of the image actually read (the server may not return exactly
+        // the requested downsample).
+        double pixelSizeMicrons = Double.NaN;
+        try {
+            var cal = server.getPixelCalibration();
+            if (cal != null && cal.hasPixelSizeMicrons() && w > 0) {
+                pixelSizeMicrons = cal.getAveragedPixelSizeMicrons() * ((double) fullWidth / w);
+            }
+        } catch (Exception ignored) {
+            // Unknown calibration: the tissue window falls back to a fraction of the image size.
+        }
+
+        return ImagePixelStats.compute(
+                imageName, downsample, w, h, channelNames, channelValues, dtypeMax, pixelSizeMicrons);
     }
 
     /**

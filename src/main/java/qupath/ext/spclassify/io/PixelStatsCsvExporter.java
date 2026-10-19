@@ -52,12 +52,14 @@ public final class PixelStatsCsvExporter {
         StringBuilder sb = new StringBuilder();
 
         // Header.
-        sb.append("Image,Verdict,Flags,Score,EmptyFraction,EmptyFractionZ,")
-                .append("MeanForegroundCoverage,MeanForegroundCoverageZ,")
+        sb.append("Image,Verdict,Flags,Score,")
+                .append("TissueFraction,TissueFractionZ,TissueSource,")
+                .append("EmptyFraction,MeanForegroundCoverage,")
                 .append("MaxSaturationFraction,MaxSaturationChannel,MaxSaturationZ,")
                 .append("MedianDynamicRange,MedianDynamicRangeZ,")
                 .append("MaxFocus,MaxFocusZ,")
-                .append("MaxIntensityZ,MaxIntensityChannel");
+                .append("BrightnessShift,BrightnessShiftZ,")
+                .append("MaxMarkerZ,MaxMarkerChannel");
         for (String ch : orderedChannels) {
             for (String metric : CHANNEL_METRICS) {
                 sb.append(',').append(csvEscape(ch + ": " + metric));
@@ -75,13 +77,15 @@ public final class PixelStatsCsvExporter {
                     .append(',')
                     .append(num(img.score()))
                     .append(',')
+                    .append(num(img.tissueFraction()))
+                    .append(',')
+                    .append(num(img.tissueFractionZ()))
+                    .append(',')
+                    .append(csvEscape(img.tissueSource()))
+                    .append(',')
                     .append(num(img.emptyFraction()))
                     .append(',')
-                    .append(num(img.emptyFractionZ()))
-                    .append(',')
                     .append(num(img.meanForegroundCoverage()))
-                    .append(',')
-                    .append(num(img.meanForegroundCoverageZ()))
                     .append(',')
                     .append(num(img.maxSaturationFraction()))
                     .append(',')
@@ -97,9 +101,13 @@ public final class PixelStatsCsvExporter {
                     .append(',')
                     .append(num(img.maxFocusZ()))
                     .append(',')
-                    .append(num(img.maxIntensityZ()))
+                    .append(num(img.brightnessShift()))
                     .append(',')
-                    .append(csvEscape(img.maxIntensityChannel()));
+                    .append(num(img.brightnessShiftZ()))
+                    .append(',')
+                    .append(num(img.maxMarkerZ()))
+                    .append(',')
+                    .append(csvEscape(img.maxMarkerChannel()));
 
             for (String ch : orderedChannels) {
                 PixelCohortReport.ChannelContext cc = findChannel(img, ch);

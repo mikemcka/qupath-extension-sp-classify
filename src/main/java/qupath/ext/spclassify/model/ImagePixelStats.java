@@ -45,8 +45,11 @@ import java.util.List;
  *   <li><b>saturationFraction</b> — fraction of pixels at or above
  *       {@code 0.999 × dtypeMax} (clipping / over-exposure). {@code NaN} when the
  *       pixel type has no fixed maximum (floating-point images).</li>
- *   <li><b>otsuThreshold</b> — the foreground/background split computed from the
- *       channel histogram by Otsu's method.</li>
+ *   <li><b>otsuThreshold</b> — the foreground/background split computed by
+ *       Otsu's method on a 256-bin histogram spanning the 0.1th to 99.9th
+ *       percentile (values outside fall in the end bins). Spanning min..max let a
+ *       few hot pixels squeeze all real values into the first bins. {@code NaN}
+ *       for a constant channel, which then has no foreground.</li>
  *   <li><b>backgroundFraction</b> — fraction of pixels strictly below
  *       {@code otsuThreshold}.</li>
  *   <li><b>foregroundCoverage</b> — {@code 1 − backgroundFraction}; the direct
@@ -60,8 +63,19 @@ import java.util.List;
  *       spatial shape is unknown or the image is smaller than 3×3.</li>
  * </ul>
  * The image-level <b>emptyFraction</b> is the fraction of pixels that are below
- * their channel's Otsu threshold in <em>every</em> channel — the single best
- * "this slide is mostly glass/background" indicator.
+ * their channel's Otsu threshold in <em>every</em> channel. With many channels it
+ * is unreliable: on a channel without stain Otsu splits the noise, so almost every
+ * pixel is above the threshold in some channel. It is kept as the fallback tissue
+ * measure for images without a nuclear channel.
+ * <p>
+ * <b>Tissue profiles.</b> For each nuclear-stain channel (see
+ * {@link #isNuclearChannel(String)}, at most {@link #MAX_TISSUE_PROFILES}) a
+ * {@link TissueProfile} is stored: the channel is averaged over a
+ * {@link #TISSUE_WINDOW_MICRONS} µm square window, transformed with
+ * {@code log(1 + max(0, x))}, and summarised by {@link #TISSUE_QUANTILES} evenly
+ * spaced percentiles. {@link PixelCohortAnalyzer} fits one tissue threshold on the
+ * pooled profiles of the whole project, so an image with almost no tissue is not
+ * split at its own noise level.
  */
 public final class ImagePixelStats {
 
@@ -70,7 +84,27 @@ public final class ImagePixelStats {
      * with a different version are not reused. Increase it whenever a change here
      * changes any computed value.
      */
-    public static final int STATS_VERSION = 1;
+    public static final int STATS_VERSION = 2;
+
+    /** Percentile (and 100 − it) bounding the Otsu histogram range. */
+    static final double OTSU_CLIP_PERCENT = 0.1;
+
+    /** Side of the averaging window used for tissue profiles, in µm. */
+    public static final double TISSUE_WINDOW_MICRONS = 30.0;
+
+    /** Window side as a fraction of the long edge when the pixel size is unknown. */
+    static final double TISSUE_WINDOW_FALLBACK_FRACTION = 0.01;
+
+    /** Number of percentiles (0, 0.1, …, 100) stored per tissue profile. */
+    public static final int TISSUE_QUANTILES = 1001;
+
+    /** Maximum number of nuclear channels profiled per image. */
+    public static final int MAX_TISSUE_PROFILES = 4;
+
+    /** Lower-case alphanumeric fragments that mark a nuclear-stain channel name. */
+    private static final List<String> NUCLEAR_NAME_FRAGMENTS = List.of(
+            "dapi", "hoechst", "draq5", "draq7", "syto", "nucblue", "sirdna", "spydna", "reddot", "nuclear", "nuclei",
+            "nucleus");
 
     /** Number of histogram bins used for Otsu thresholding. */
     private static final int OTSU_BINS = 256;
@@ -119,8 +153,61 @@ public final class ImagePixelStats {
             double laplacianVariance) {}
 
     /**
+     * Distribution of a smoothed nuclear channel, used to measure tissue area
+     * against a project-wide threshold.
+     *
+     * @param channel       channel name
+     * @param windowPixels  side of the averaging window, in pixels of the image read
+     * @param logQuantiles  {@link #TISSUE_QUANTILES} evenly spaced percentiles (0 to
+     *                      100) of {@code log(1 + max(0, smoothed value))}, ascending
+     */
+    public record TissueProfile(String channel, int windowPixels, double[] logQuantiles) {
+
+        public TissueProfile {
+            logQuantiles = logQuantiles == null ? new double[0] : logQuantiles.clone();
+        }
+
+        @Override
+        public double[] logQuantiles() {
+            return logQuantiles.clone();
+        }
+
+        /** @return the fraction of the image at or above {@code logThreshold}. */
+        public double fractionAtOrAbove(double logThreshold) {
+            if (logQuantiles.length == 0 || Double.isNaN(logThreshold)) {
+                return Double.NaN;
+            }
+            int n = 0;
+            for (double q : logQuantiles) {
+                if (q >= logThreshold) {
+                    n++;
+                }
+            }
+            return (double) n / logQuantiles.length;
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            return o instanceof TissueProfile t
+                    && windowPixels == t.windowPixels
+                    && java.util.Objects.equals(channel, t.channel)
+                    && Arrays.equals(logQuantiles, t.logQuantiles);
+        }
+
+        @Override
+        public int hashCode() {
+            return 31 * java.util.Objects.hash(channel, windowPixels) + Arrays.hashCode(logQuantiles);
+        }
+
+        @Override
+        public String toString() {
+            return "TissueProfile[channel=" + channel + ", windowPixels=" + windowPixels + "]";
+        }
+    }
+
+    /**
      * Immutable whole-image summary: one {@link ChannelStats} per channel plus
-     * the cross-channel {@link #emptyFraction()}.
+     * the cross-channel {@link #emptyFraction()} and nuclear tissue profiles.
      *
      * @param imageName     image name
      * @param downsample    downsample factor actually used to read the pixels
@@ -130,6 +217,7 @@ public final class ImagePixelStats {
      * @param emptyFraction fraction of pixels below the Otsu threshold in every channel
      * @param imageId       project entry ID ({@code ProjectImageEntry.getID()}), or
      *                      {@code null} when the image is not from a project
+     * @param tissueProfiles profiles of the nuclear channels, in channel order (may be empty)
      */
     public record ImageStats(
             String imageName,
@@ -138,11 +226,35 @@ public final class ImagePixelStats {
             int height,
             List<ChannelStats> channels,
             double emptyFraction,
-            String imageId) {
+            String imageId,
+            List<TissueProfile> tissueProfiles) {
 
         public ImageStats {
             imageName = imageName == null ? "" : imageName;
             channels = channels == null ? List.of() : List.copyOf(channels);
+            tissueProfiles = tissueProfiles == null ? List.of() : List.copyOf(tissueProfiles);
+        }
+
+        /** Statistics without tissue profiles. */
+        public ImageStats(
+                String imageName,
+                double downsample,
+                int width,
+                int height,
+                List<ChannelStats> channels,
+                double emptyFraction,
+                String imageId) {
+            this(imageName, downsample, width, height, channels, emptyFraction, imageId, List.of());
+        }
+
+        /** @return the tissue profile for {@code channel}, or {@code null}. */
+        public TissueProfile tissueProfile(String channel) {
+            for (var t : tissueProfiles) {
+                if (t.channel().equals(channel)) {
+                    return t;
+                }
+            }
+            return null;
         }
 
         /** Statistics without a project entry ID. */
@@ -153,12 +265,12 @@ public final class ImagePixelStats {
                 int height,
                 List<ChannelStats> channels,
                 double emptyFraction) {
-            this(imageName, downsample, width, height, channels, emptyFraction, null);
+            this(imageName, downsample, width, height, channels, emptyFraction, null, List.of());
         }
 
         /** @return a copy with a different display name and entry ID. */
         public ImageStats withIdentity(String newName, String newId) {
-            return new ImageStats(newName, downsample, width, height, channels, emptyFraction, newId);
+            return new ImageStats(newName, downsample, width, height, channels, emptyFraction, newId, tissueProfiles);
         }
     }
 
@@ -277,9 +389,8 @@ public final class ImagePixelStats {
             saturationFraction = (double) saturated / n;
         }
 
-        double otsu = otsuThresholdSorted(sorted, min, max);
-        long below = countBelow(sorted, otsu);
-        double backgroundFraction = (double) below / n;
+        double otsu = otsuThresholdClipped(sorted);
+        double backgroundFraction = Double.isNaN(otsu) ? 1.0 : (double) countBelow(sorted, otsu) / n;
         double foregroundCoverage = 1.0 - backgroundFraction;
         double dynamicRange = p99 - p1;
         double laplacianVariance = laplacianVariance(values, width, height);
@@ -374,6 +485,25 @@ public final class ImagePixelStats {
             List<String> channelNames,
             float[][] channelValues,
             double dtypeMax) {
+        return compute(imageName, downsample, width, height, channelNames, channelValues, dtypeMax, Double.NaN);
+    }
+
+    /**
+     * As {@link #compute(String, double, int, int, List, float[][], double)}, also
+     * storing a {@link TissueProfile} for each nuclear channel.
+     *
+     * @param pixelSizeMicrons pixel size of the image read, in µm; {@code NaN} if
+     *                         unknown (the averaging window is then 1% of the long edge)
+     */
+    public static ImageStats compute(
+            String imageName,
+            double downsample,
+            int width,
+            int height,
+            List<String> channelNames,
+            float[][] channelValues,
+            double dtypeMax,
+            double pixelSizeMicrons) {
 
         if (channelValues == null || channelValues.length == 0) {
             return new ImageStats(imageName, downsample, width, height, List.of(), Double.NaN);
@@ -392,7 +522,135 @@ public final class ImagePixelStats {
 
         double emptyFraction = emptyFraction(channelValues, otsuThresholds);
 
-        return new ImageStats(imageName, downsample, width, height, channelStats, emptyFraction);
+        var profiles = new ArrayList<TissueProfile>();
+        if (width > 0 && height > 0) {
+            int window = tissueWindowPixels(width, height, pixelSizeMicrons);
+            for (int c = 0; c < nChannels && profiles.size() < MAX_TISSUE_PROFILES; c++) {
+                String name = channelStats.get(c).channel();
+                if (isNuclearChannel(name)
+                        && channelValues[c] != null
+                        && (long) width * height <= channelValues[c].length) {
+                    profiles.add(tissueProfile(name, channelValues[c], width, height, window));
+                }
+            }
+        }
+
+        return new ImageStats(imageName, downsample, width, height, channelStats, emptyFraction, null, profiles);
+    }
+
+    /**
+     * @param name channel name
+     * @return true if the name looks like a nuclear stain (DAPI, Hoechst, DRAQ5, …),
+     *         matched on lower-case alphanumerics only
+     */
+    public static boolean isNuclearChannel(String name) {
+        if (name == null) {
+            return false;
+        }
+        String key = name.toLowerCase(java.util.Locale.ROOT).replaceAll("[^a-z0-9]", "");
+        for (String f : NUCLEAR_NAME_FRAGMENTS) {
+            if (key.contains(f)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Side of the tissue averaging window in pixels: {@link #TISSUE_WINDOW_MICRONS}
+     * µm when the pixel size is known, otherwise 1% of the long edge; odd and ≥ 1.
+     */
+    static int tissueWindowPixels(int width, int height, double pixelSizeMicrons) {
+        double w = (pixelSizeMicrons > 0 && Double.isFinite(pixelSizeMicrons))
+                ? TISSUE_WINDOW_MICRONS / pixelSizeMicrons
+                : TISSUE_WINDOW_FALLBACK_FRACTION * Math.max(width, height);
+        int px = Math.max(1, (int) Math.round(w));
+        return (px % 2 == 0) ? px + 1 : px;
+    }
+
+    /**
+     * Build the tissue profile of one channel: mean over a {@code windowPixels}
+     * square window (non-finite pixels ignored), then {@code log(1 + max(0, x))},
+     * then {@link #TISSUE_QUANTILES} evenly spaced percentiles.
+     */
+    public static TissueProfile tissueProfile(String channel, float[] values, int width, int height, int windowPixels) {
+        float[] smoothed = boxMean(values, width, height, windowPixels / 2);
+        double[] logs = new double[smoothed.length];
+        int n = 0;
+        for (float v : smoothed) {
+            if (Float.isFinite(v)) {
+                logs[n++] = Math.log1p(Math.max(0.0, v));
+            }
+        }
+        double[] q = new double[n == 0 ? 0 : TISSUE_QUANTILES];
+        if (n > 0) {
+            double[] sortedLogs = Arrays.copyOf(logs, n);
+            Arrays.sort(sortedLogs);
+            for (int i = 0; i < TISSUE_QUANTILES; i++) {
+                q[i] = percentileSorted(sortedLogs, 100.0 * i / (TISSUE_QUANTILES - 1));
+            }
+        }
+        return new TissueProfile(channel, windowPixels, q);
+    }
+
+    /**
+     * Mean over a {@code (2r+1)²} window clipped at the image border, ignoring
+     * non-finite pixels ({@code NaN} where the window has none). Two separable
+     * running-sum passes, O(width × height) for any radius.
+     */
+    static float[] boxMean(float[] values, int width, int height, int radius) {
+        int size = width * height;
+        float[] rowSum = new float[size];
+        float[] rowCount = new float[size];
+        for (int y = 0; y < height; y++) {
+            int row = y * width;
+            double sum = 0.0;
+            int count = 0;
+            // Window [x - r, x + r]: add x + r, remove x - r - 1.
+            for (int x = -radius; x < width; x++) {
+                int add = x + radius;
+                if (add < width) {
+                    float v = values[row + add];
+                    if (Float.isFinite(v)) {
+                        sum += v;
+                        count++;
+                    }
+                }
+                int remove = x - radius - 1;
+                if (remove >= 0) {
+                    float v = values[row + remove];
+                    if (Float.isFinite(v)) {
+                        sum -= v;
+                        count--;
+                    }
+                }
+                if (x >= 0) {
+                    rowSum[row + x] = (float) sum;
+                    rowCount[row + x] = count;
+                }
+            }
+        }
+        float[] out = new float[size];
+        for (int x = 0; x < width; x++) {
+            double sum = 0.0;
+            double count = 0.0;
+            for (int y = -radius; y < height; y++) {
+                int add = y + radius;
+                if (add < height) {
+                    sum += rowSum[add * width + x];
+                    count += rowCount[add * width + x];
+                }
+                int remove = y - radius - 1;
+                if (remove >= 0) {
+                    sum -= rowSum[remove * width + x];
+                    count -= rowCount[remove * width + x];
+                }
+                if (y >= 0) {
+                    out[y * width + x] = count > 0.5 ? (float) (sum / count) : Float.NaN;
+                }
+            }
+        }
+        return out;
     }
 
     /**
@@ -468,16 +726,40 @@ public final class ImagePixelStats {
             return sorted[lo];
         }
         double frac = rank - lo;
-        return sorted[lo] * (1.0 - frac) + sorted[hi] * frac;
+        // a + f·(b − a) is exact when a == b, so percentiles never decrease.
+        return sorted[lo] + frac * (sorted[hi] - sorted[lo]);
+    }
+
+    /**
+     * Otsu's threshold with the histogram spanning the {@link #OTSU_CLIP_PERCENT}th
+     * to (100 − it)th percentile. Falls back to min..max when that range is empty
+     * (a channel that is constant apart from under 0.1% of its pixels).
+     *
+     * @param sorted ascending-sorted values, length ≥ 1
+     * @return the threshold, or {@code NaN} for a constant channel
+     */
+    public static double otsuThresholdClipped(double[] sorted) {
+        int n = sorted.length;
+        if (n == 0 || sorted[0] == sorted[n - 1]) {
+            return Double.NaN;
+        }
+        double lo = percentileSorted(sorted, OTSU_CLIP_PERCENT);
+        double hi = percentileSorted(sorted, 100.0 - OTSU_CLIP_PERCENT);
+        if (hi <= lo) {
+            lo = sorted[0];
+            hi = sorted[n - 1];
+        }
+        return otsuThresholdSorted(sorted, lo, hi);
     }
 
     /**
      * Otsu's threshold over an ascending-sorted array, computed from a
-     * fixed-width histogram between {@code min} and {@code max}.
+     * fixed-width histogram between {@code min} and {@code max}. Values outside
+     * that range are counted in the first or last bin.
      *
      * @param sorted ascending-sorted values, length ≥ 1
-     * @param min    minimum value (== {@code sorted[0]})
-     * @param max    maximum value (== {@code sorted[length-1]})
+     * @param min    lower edge of the histogram
+     * @param max    upper edge of the histogram
      * @return the threshold intensity that maximises between-class variance, or
      *         {@code min} for a degenerate (single-value) distribution
      */

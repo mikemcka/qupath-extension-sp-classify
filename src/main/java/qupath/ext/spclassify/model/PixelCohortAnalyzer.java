@@ -1,11 +1,13 @@
 package qupath.ext.spclassify.model;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import qupath.ext.spclassify.util.RobustStats;
 
 /**
@@ -15,50 +17,63 @@ import qupath.ext.spclassify.util.RobustStats;
  * <a href="https://pypi.org/project/pixel-patrol/">pixel-patrol</a> (MIT) — see
  * {@link ImagePixelStats} for the attribution note.
  * <p>
- * Given one {@link ImagePixelStats.ImageStats} per project image, this computes
- * robust (MAD-scaled) z-scores for image-level summary scalars (empty/background
- * fraction, mean foreground coverage, peak saturation, median dynamic range,
- * focus) and for the {@code p99} of each channel, then applies deterministic
- * threshold rules to assign each image a verdict, a set of flag reason codes, and
- * a plain-English review.
- * <p>
- * The {@code p99} z (intensity outlier) is computed only for channels whose
- * cohort-median foreground coverage is at least {@code SIGNAL_FOREGROUND_FLOOR}.
- * A MAD-scaled z on a near-dead channel (whose values all sit at the noise floor)
- * turns small differences into very large z-scores. Focus is reported but never
- * flags an image.
- * <p>
- * The robust-z definition is identical to {@link CohortAnomalyAnalyzer}:
- * {@code z = 0.6745 · (x − median) / MAD}. Like that class, this one is free of
- * any QuPath/JavaFX dependency and is unit-tested in isolation.
+ * Robust z-scores ({@code z = 0.6745 · (x − median) / MAD}, as in
+ * {@link CohortAnomalyAnalyzer}) are computed across the cohort for:
+ * <ul>
+ *   <li><b>tissue fraction</b> — from the nuclear channel's
+ *       {@link ImagePixelStats.TissueProfile}, thresholded at one project-wide
+ *       Otsu threshold fitted on the pooled profiles (every image weighted
+ *       equally). A per-image threshold would split an empty image at its own
+ *       noise level. Without a nuclear channel, {@code 1 − emptyFraction} is used.</li>
+ *   <li><b>peak saturation</b> and <b>median dynamic range</b> (unchanged).</li>
+ *   <li><b>brightness shift</b> — the median, over signal channels, of
+ *       {@code log(p99) − cohort median log(p99)}: how much brighter or dimmer the
+ *       whole image is. Single-marker differences are reported
+ *       ({@link PixelCohortReport.ImageReport#maxMarkerZ()}) but never flag, because
+ *       the p99 of one marker mostly reflects which cells the image contains.</li>
+ *   <li><b>focus</b> (reported, never flagged — it tracks brightness as well as sharpness).</li>
+ * </ul>
+ * Signal channels are those whose cohort-median foreground coverage is at least
+ * {@code SIGNAL_FOREGROUND_FLOOR}; near-dead channels would turn small differences
+ * into very large z-scores. Like {@link CohortAnomalyAnalyzer}, this class is free
+ * of any QuPath/JavaFX dependency and is unit-tested in isolation.
  */
 public final class PixelCohortAnalyzer {
 
     /**
-     * A channel takes part in intensity-outlier detection only if its cohort-median
+     * A channel takes part in brightness comparisons only if its cohort-median
      * foreground coverage clears this floor. Near-dead / mostly-background markers
-     * (whose p99 hovers at the noise floor) are excluded, so their meaningless
-     * relative jitter cannot manufacture spurious z-scores — the failure mode that
-     * sank the original per-channel median z.
+     * (whose p99 sits at the noise floor) are excluded.
      */
     private static final double SIGNAL_FOREGROUND_FLOOR = 0.05;
 
+    /** Single-marker |z| at or above which the review names the marker (informational). */
+    private static final double MARKER_NOTE_Z = 3.0;
+
     private PixelCohortAnalyzer() {}
 
-    /** Analyse with {@link PixelCohortReport#DEFAULT_THRESHOLDS}. */
+    /** Analyse with {@link PixelCohortReport#DEFAULT_THRESHOLDS} and the automatic tissue channel. */
     public static PixelCohortReport analyze(List<ImagePixelStats.ImageStats> inputs) {
-        return analyze(inputs, PixelCohortReport.DEFAULT_THRESHOLDS);
+        return analyze(inputs, PixelCohortReport.DEFAULT_THRESHOLDS, null);
+    }
+
+    /** Analyse with the automatic tissue channel. */
+    public static PixelCohortReport analyze(
+            List<ImagePixelStats.ImageStats> inputs, PixelCohortReport.Thresholds thresholds) {
+        return analyze(inputs, thresholds, null);
     }
 
     /**
      * Analyse a cohort of per-image pixel statistics.
      *
-     * @param inputs     per-image statistics (nulls are skipped)
-     * @param thresholds verdict cutoffs; {@code null} uses the defaults
+     * @param inputs        per-image statistics (nulls are skipped)
+     * @param thresholds    verdict cutoffs; {@code null} uses the defaults
+     * @param tissueChannel nuclear channel to measure tissue with; {@code null} or a
+     *                      channel no image has picks the one present in most images
      * @return the cohort report, images sorted worst-first
      */
     public static PixelCohortReport analyze(
-            List<ImagePixelStats.ImageStats> inputs, PixelCohortReport.Thresholds thresholds) {
+            List<ImagePixelStats.ImageStats> inputs, PixelCohortReport.Thresholds thresholds, String tissueChannel) {
 
         if (thresholds == null) {
             thresholds = PixelCohortReport.DEFAULT_THRESHOLDS;
@@ -78,8 +93,37 @@ public final class PixelCohortAnalyzer {
 
         int nImages = safe.size();
 
-        // ── Image-level summary scalars ─────────────────────────────────────────
-        double[] emptyFraction = new double[nImages];
+        // ── Tissue fraction ────────────────────────────────────────────────────
+        List<String> candidates = tissueChannelCandidates(safe);
+        String chosen = (tissueChannel != null && candidates.contains(tissueChannel))
+                ? tissueChannel
+                : (candidates.isEmpty() ? null : candidates.get(0));
+        double tissueThreshold = Double.NaN;
+        double[] tissue = new double[nImages];
+        String[] tissueSource = new String[nImages];
+        if (chosen != null) {
+            var profiles = new ArrayList<double[]>();
+            for (var img : safe) {
+                var tp = img.tissueProfile(chosen);
+                if (tp != null) {
+                    profiles.add(tp.logQuantiles());
+                }
+            }
+            tissueThreshold = cohortTissueThreshold(profiles);
+            for (int i = 0; i < nImages; i++) {
+                var tp = safe.get(i).tissueProfile(chosen);
+                tissue[i] = tp == null ? Double.NaN : tp.fractionAtOrAbove(tissueThreshold);
+                tissueSource[i] = Double.isNaN(tissue[i]) ? null : chosen;
+            }
+        } else {
+            for (int i = 0; i < nImages; i++) {
+                double empty = safe.get(i).emptyFraction();
+                tissue[i] = Double.isNaN(empty) ? Double.NaN : 1.0 - empty;
+                tissueSource[i] = Double.isNaN(tissue[i]) ? null : PixelCohortReport.TISSUE_SOURCE_ALL_CHANNELS;
+            }
+        }
+
+        // ── Other image-level summary scalars ───────────────────────────────────
         double[] meanForeground = new double[nImages];
         double[] maxSaturation = new double[nImages];
         String[] maxSaturationChannel = new String[nImages];
@@ -88,8 +132,6 @@ public final class PixelCohortAnalyzer {
 
         for (int i = 0; i < nImages; i++) {
             var img = safe.get(i);
-            emptyFraction[i] = img.emptyFraction();
-
             var fgList = new ArrayList<Double>();
             var dynList = new ArrayList<Double>();
             double bestSat = Double.NaN;
@@ -107,9 +149,7 @@ public final class PixelCohortAnalyzer {
                     bestSat = sat;
                     bestSatCh = cs.channel();
                 }
-                // Image focus = the sharpest channel. The brightest/most-structured
-                // channel dominates; near-dead channels have tiny Laplacian variance
-                // and never win, so a blurred image's max still drops cohort-wide.
+                // Image focus = the sharpest channel.
                 double focus = cs.laplacianVariance();
                 if (!Double.isNaN(focus) && (Double.isNaN(bestFocus) || focus > bestFocus)) {
                     bestFocus = focus;
@@ -122,44 +162,80 @@ public final class PixelCohortAnalyzer {
             maxFocus[i] = bestFocus;
         }
 
-        double[] emptyFractionZ = robustZ(emptyFraction);
-        double[] meanForegroundZ = robustZ(meanForeground);
-        double[] maxSaturationZ = robustZ(maxSaturation);
-        double[] medianDynamicRangeZ = robustZ(medianDynamicRange);
-        double[] maxFocusZ = robustZ(maxFocus);
-
-        double medEmptyFraction = medianIgnoreNaN(emptyFraction);
-        double medMeanForeground = medianIgnoreNaN(meanForeground);
-        double medMaxSaturation = medianIgnoreNaN(maxSaturation);
-        double medMedianDynamicRange = medianIgnoreNaN(medianDynamicRange);
-        double medMaxFocus = medianIgnoreNaN(maxFocus);
-
-        // ── Per-channel p99 (brightness) z, on signal-bearing channels only ──────
-        // This is the intensity-outlier signal: a slide whose brightness profile
-        // diverges from the cohort is a likely ML challenge. Restricting to
-        // signal-bearing channels keeps near-dead markers from exploding the z.
+        // ── Brightness: per-channel log(p99) on signal channels ─────────────────
         var channelOrder = new LinkedHashSet<String>();
         for (var img : safe) {
             for (var cs : img.channels()) {
                 channelOrder.add(cs.channel());
             }
         }
-        var p99ZByChannel = new LinkedHashMap<String, double[]>();
+        var signalChannels = new ArrayList<String>();
+        var logDevByChannel = new ArrayList<double[]>(); // log(p99) − cohort median, per image
+        var markerZByChannel = new ArrayList<double[]>();
         var medP99ByChannel = new LinkedHashMap<String, Double>();
         for (String ch : channelOrder) {
-            double[] p99 = new double[nImages];
+            double[] logP99 = new double[nImages];
             double[] fg = new double[nImages];
+            double[] p99 = new double[nImages];
             for (int i = 0; i < nImages; i++) {
                 var cs = channelOf(safe.get(i), ch);
                 p99[i] = cs == null ? Double.NaN : cs.p99();
+                logP99[i] = (cs == null || !(cs.p99() > 0)) ? Double.NaN : Math.log(cs.p99());
                 fg[i] = cs == null ? Double.NaN : cs.foregroundCoverage();
             }
             double medFg = medianIgnoreNaN(fg);
-            if (!Double.isNaN(medFg) && medFg >= SIGNAL_FOREGROUND_FLOOR) {
-                p99ZByChannel.put(ch, robustZ(p99));
-                medP99ByChannel.put(ch, medianIgnoreNaN(p99));
+            double medLog = medianIgnoreNaN(logP99);
+            if (Double.isNaN(medFg) || medFg < SIGNAL_FOREGROUND_FLOOR || Double.isNaN(medLog)) {
+                continue;
+            }
+            double[] dev = new double[nImages];
+            for (int i = 0; i < nImages; i++) {
+                dev[i] = logP99[i] - medLog;
+            }
+            signalChannels.add(ch);
+            logDevByChannel.add(dev);
+            markerZByChannel.add(robustZ(logP99));
+            medP99ByChannel.put(ch, medianIgnoreNaN(p99));
+        }
+        double[] logShift = new double[nImages];
+        int[] shiftChannels = new int[nImages];
+        double[] maxMarkerZ = new double[nImages];
+        String[] maxMarkerChannel = new String[nImages];
+        for (int i = 0; i < nImages; i++) {
+            double[] devs = new double[signalChannels.size()];
+            int n = 0;
+            double bestAbs = 0.0;
+            for (int c = 0; c < signalChannels.size(); c++) {
+                double d = logDevByChannel.get(c)[i];
+                if (!Double.isNaN(d)) {
+                    devs[n++] = d;
+                }
+                double z = markerZByChannel.get(c)[i];
+                if (!Double.isNaN(z) && Math.abs(z) > bestAbs) {
+                    bestAbs = Math.abs(z);
+                    maxMarkerZ[i] = z;
+                    maxMarkerChannel[i] = signalChannels.get(c);
+                }
+            }
+            logShift[i] = n == 0 ? Double.NaN : medianIgnoreNaN(Arrays.copyOf(devs, n));
+            shiftChannels[i] = n;
+            if (maxMarkerChannel[i] == null) {
+                maxMarkerZ[i] = Double.NaN;
             }
         }
+
+        double[] tissueZ = robustZ(tissue);
+        double[] maxSaturationZ = robustZ(maxSaturation);
+        double[] medianDynamicRangeZ = robustZ(medianDynamicRange);
+        double[] maxFocusZ = robustZ(maxFocus);
+        double[] shiftZ = robustZ(logShift);
+
+        var ctx = new Context(
+                medianIgnoreNaN(tissue),
+                medianIgnoreNaN(maxSaturation),
+                medianIgnoreNaN(medianDynamicRange),
+                medianIgnoreNaN(maxFocus),
+                medP99ByChannel);
 
         // ── Build per-image reports ─────────────────────────────────────────────
         var reports = new ArrayList<PixelCohortReport.ImageReport>(nImages);
@@ -172,10 +248,9 @@ public final class PixelCohortAnalyzer {
                 channelContexts.add(new PixelCohortReport.ChannelContext(cs.channel(), cs));
             }
 
-            // ── Flags ──
-            var flags = new ArrayList<String>(3);
-            boolean backgroundHeavy = ge(emptyFractionZ[i], thresholds.backgroundEmptyZ())
-                    || le(meanForegroundZ[i], -thresholds.backgroundForegroundZ());
+            var flags = new ArrayList<String>(4);
+            boolean backgroundHeavy = le(tissueZ[i], -thresholds.backgroundTissueZ())
+                    || (!Double.isNaN(tissue[i]) && tissue[i] < thresholds.backgroundMinTissue());
             if (backgroundHeavy) {
                 flags.add(PixelCohortReport.BACKGROUND_HEAVY);
             }
@@ -190,67 +265,37 @@ public final class PixelCohortAnalyzer {
             if (weakSignal) {
                 flags.add(PixelCohortReport.WEAK_SIGNAL);
             }
-            // Focus (maxFocus) is computed and surfaced for inspection but does NOT
-            // drive a verdict: raw Laplacian variance tracks brightness as much as
-            // sharpness, so flagging it would mislabel dim-but-fine slides.
-
-            // Intensity outlier: the signal-bearing channel whose p99 (brightness)
-            // diverges most from the cohort. These slides are the likely ML
-            // challenges the prescreen is meant to surface.
-            double maxIntensityAbsZ = 0.0;
-            double maxIntensitySignedZ = 0.0;
-            String maxIntensityChannel = null;
-            for (var cs : img.channels()) {
-                double[] zs = p99ZByChannel.get(cs.channel());
-                if (zs == null) {
-                    continue;
-                }
-                double z = zs[i];
-                if (!Double.isNaN(z) && Math.abs(z) > maxIntensityAbsZ) {
-                    maxIntensityAbsZ = Math.abs(z);
-                    maxIntensitySignedZ = z;
-                    maxIntensityChannel = cs.channel();
-                }
-            }
-            boolean intensityOutlier = maxIntensityAbsZ >= thresholds.intensityOutlierZ();
+            boolean intensityOutlier = !Double.isNaN(shiftZ[i]) && Math.abs(shiftZ[i]) >= thresholds.brightnessShiftZ();
             if (intensityOutlier) {
                 flags.add(PixelCohortReport.INTENSITY_OUTLIER);
             }
 
             String verdict = verdict(flags);
 
-            double score = relu(emptyFractionZ[i])
-                    + relu(-meanForegroundZ[i])
+            double absShiftZ = Double.isNaN(shiftZ[i]) ? 0.0 : Math.abs(shiftZ[i]);
+            double score = relu(-tissueZ[i])
                     + (saturated ? relu(maxSaturationZ[i]) : 0.0)
                     + relu(-medianDynamicRangeZ[i])
-                    + relu(maxIntensityAbsZ - 2.0);
+                    + relu(absShiftZ - 2.0);
 
-            double medP99 = maxIntensityChannel == null
-                    ? Double.NaN
-                    : medP99ByChannel.getOrDefault(maxIntensityChannel, Double.NaN);
-            String narrative = buildNarrative(
-                    img,
-                    verdict,
-                    flags,
-                    emptyFraction[i],
-                    emptyFractionZ[i],
-                    medEmptyFraction,
-                    meanForeground[i],
-                    meanForegroundZ[i],
-                    medMeanForeground,
+            double brightnessShift = Double.isNaN(logShift[i]) ? Double.NaN : Math.exp(logShift[i]);
+            var row = new Row(
+                    tissue[i],
+                    tissueZ[i],
+                    tissueSource[i],
                     maxSaturation[i],
                     maxSaturationChannel[i],
                     maxSaturationZ[i],
-                    medMaxSaturation,
                     medianDynamicRange[i],
                     medianDynamicRangeZ[i],
-                    medMedianDynamicRange,
                     maxFocus[i],
                     maxFocusZ[i],
-                    medMaxFocus,
-                    maxIntensityChannel,
-                    maxIntensitySignedZ,
-                    medP99);
+                    brightnessShift,
+                    shiftZ[i],
+                    shiftChannels[i],
+                    maxMarkerZ[i],
+                    maxMarkerChannel[i]);
+            String narrative = buildNarrative(img, verdict, flags, row, ctx);
 
             reports.add(new PixelCohortReport.ImageReport(
                     img.imageName(),
@@ -258,10 +303,11 @@ public final class PixelCohortAnalyzer {
                     flags,
                     score,
                     narrative,
-                    emptyFraction[i],
-                    emptyFractionZ[i],
+                    tissue[i],
+                    tissueZ[i],
+                    tissueSource[i],
+                    img.emptyFraction(),
                     meanForeground[i],
-                    meanForegroundZ[i],
                     maxSaturation[i],
                     maxSaturationChannel[i],
                     maxSaturationZ[i],
@@ -269,8 +315,10 @@ public final class PixelCohortAnalyzer {
                     medianDynamicRangeZ[i],
                     maxFocus[i],
                     maxFocusZ[i],
-                    maxIntensitySignedZ,
-                    maxIntensityChannel,
+                    brightnessShift,
+                    shiftZ[i],
+                    maxMarkerZ[i],
+                    maxMarkerChannel[i],
                     channelContexts,
                     img.imageId()));
         }
@@ -279,132 +327,177 @@ public final class PixelCohortAnalyzer {
                 .reversed()
                 .thenComparing(PixelCohortReport.ImageReport::imageName));
 
-        return new PixelCohortReport(reports);
+        return new PixelCohortReport(reports, chosen, candidates, tissueThreshold);
+    }
+
+    /**
+     * Nuclear channels with a tissue profile in at least one image, ordered by the
+     * number of images that have them (most first), then by first appearance.
+     */
+    static List<String> tissueChannelCandidates(List<ImagePixelStats.ImageStats> images) {
+        var counts = new LinkedHashMap<String, Integer>();
+        for (var img : images) {
+            var seen = new java.util.HashSet<String>();
+            for (var tp : img.tissueProfiles()) {
+                if (tp.channel() != null && seen.add(tp.channel())) {
+                    counts.merge(tp.channel(), 1, Integer::sum);
+                }
+            }
+        }
+        var names = new ArrayList<>(counts.keySet());
+        // Stable sort keeps first-appearance order among equal counts.
+        names.sort(Comparator.comparingInt((String n) -> counts.get(n)).reversed());
+        return names;
+    }
+
+    /**
+     * Otsu threshold (0.1–99.9 percentile histogram range) on the pooled tissue
+     * profiles. Every profile has the same number of percentiles, so every image
+     * carries equal weight whatever its size.
+     *
+     * @return the threshold on the log scale, or {@code NaN} when there is no data
+     *         or every value is equal
+     */
+    static double cohortTissueThreshold(List<double[]> profiles) {
+        int total = 0;
+        for (double[] p : profiles) {
+            total += p.length;
+        }
+        double[] pooled = new double[total];
+        int k = 0;
+        for (double[] p : profiles) {
+            System.arraycopy(p, 0, pooled, k, p.length);
+            k += p.length;
+        }
+        Arrays.sort(pooled);
+        return ImagePixelStats.otsuThresholdClipped(pooled);
     }
 
     // ── Narrative ───────────────────────────────────────────────────────────────
 
-    private static String buildNarrative(
-            ImagePixelStats.ImageStats img,
-            String verdict,
-            List<String> flags,
-            double emptyFraction,
-            double emptyFractionZ,
-            double medEmptyFraction,
-            double meanForeground,
-            double meanForegroundZ,
-            double medMeanForeground,
+    /** Cohort medians used in the narrative. */
+    private record Context(
+            double medTissue,
+            double medMaxSaturation,
+            double medDynamicRange,
+            double medMaxFocus,
+            Map<String, Double> medP99ByChannel) {}
+
+    /** One image's values used in the narrative. */
+    private record Row(
+            double tissue,
+            double tissueZ,
+            String tissueSource,
             double maxSaturation,
             String maxSaturationChannel,
             double maxSaturationZ,
-            double medMaxSaturation,
             double medianDynamicRange,
             double medianDynamicRangeZ,
-            double medMedianDynamicRange,
             double maxFocus,
             double maxFocusZ,
-            double medMaxFocus,
-            String maxIntensityChannel,
-            double maxIntensitySignedZ,
-            double medP99) {
+            double brightnessShift,
+            double brightnessShiftZ,
+            int brightnessChannels,
+            double maxMarkerZ,
+            String maxMarkerChannel) {}
+
+    private static String buildNarrative(
+            ImagePixelStats.ImageStats img, String verdict, List<String> flags, Row r, Context ctx) {
 
         var sb = new StringBuilder();
         sb.append(img.imageName()).append(" — ").append(verdict).append('\n');
 
-        // Foreground / background context.
-        if (flags.contains(PixelCohortReport.BACKGROUND_HEAVY) || notable(emptyFractionZ) || notable(meanForegroundZ)) {
-            sb.append("• Foreground coverage ")
-                    .append(fmtPct(meanForeground))
-                    .append(" (cohort median ")
-                    .append(fmtPct(medMeanForeground))
+        if (flags.contains(PixelCohortReport.BACKGROUND_HEAVY) || notable(r.tissueZ())) {
+            sb.append("• Tissue ")
+                    .append(fmtPct(r.tissue()))
+                    .append(" of the image (cohort median ")
+                    .append(fmtPct(ctx.medTissue()))
                     .append(", ")
-                    .append(fmtZ(meanForegroundZ))
-                    .append(" MAD).");
-            if (!Double.isNaN(emptyFraction)) {
-                sb.append(" Empty/glass ")
-                        .append(fmtPct(emptyFraction))
-                        .append(" (median ")
-                        .append(fmtPct(medEmptyFraction))
-                        .append(", ")
-                        .append(fmtZ(emptyFractionZ))
-                        .append(" MAD).");
+                    .append(fmtZ(r.tissueZ()))
+                    .append(" MAD), ");
+            if (PixelCohortReport.TISSUE_SOURCE_ALL_CHANNELS.equals(r.tissueSource())) {
+                sb.append("measured as pixels above background in at least one channel (no nuclear channel).\n");
+            } else {
+                sb.append("measured on the smoothed ").append(r.tissueSource()).append(" channel.\n");
             }
-            sb.append('\n');
         }
 
-        // Saturation context.
-        if (flags.contains(PixelCohortReport.SATURATED) || notable(maxSaturationZ)) {
-            sb.append("• Peak saturation ").append(fmtPct(maxSaturation));
-            if (maxSaturationChannel != null) {
-                sb.append(" in ").append(maxSaturationChannel);
+        if (flags.contains(PixelCohortReport.SATURATED) || notable(r.maxSaturationZ())) {
+            sb.append("• Peak saturation ").append(fmtPct(r.maxSaturation()));
+            if (r.maxSaturationChannel() != null) {
+                sb.append(" in ").append(r.maxSaturationChannel());
             }
             sb.append(" (cohort median ")
-                    .append(fmtPct(medMaxSaturation))
+                    .append(fmtPct(ctx.medMaxSaturation()))
                     .append(", ")
-                    .append(fmtZ(maxSaturationZ))
+                    .append(fmtZ(r.maxSaturationZ()))
                     .append(" MAD).\n");
         }
 
-        // Dynamic range / weak signal context.
-        if (flags.contains(PixelCohortReport.WEAK_SIGNAL) || notable(medianDynamicRangeZ)) {
+        if (flags.contains(PixelCohortReport.WEAK_SIGNAL) || notable(r.medianDynamicRangeZ())) {
             sb.append("• Median dynamic range ")
-                    .append(fmtNum(medianDynamicRange))
+                    .append(fmtNum(r.medianDynamicRange()))
                     .append(" (cohort median ")
-                    .append(fmtNum(medMedianDynamicRange))
+                    .append(fmtNum(ctx.medDynamicRange()))
                     .append(", ")
-                    .append(fmtZ(medianDynamicRangeZ))
+                    .append(fmtZ(r.medianDynamicRangeZ()))
                     .append(" MAD).\n");
         }
 
-        // Focus / sharpness context (informational only — not a flag).
-        if (notable(maxFocusZ)) {
+        if (notable(r.maxFocusZ())) {
             sb.append("• Focus (sharpest-channel Laplacian variance) ")
-                    .append(fmtNum(maxFocus))
+                    .append(fmtNum(r.maxFocus()))
                     .append(" (cohort median ")
-                    .append(fmtNum(medMaxFocus))
+                    .append(fmtNum(ctx.medMaxFocus()))
                     .append(", ")
-                    .append(fmtZ(maxFocusZ))
+                    .append(fmtZ(r.maxFocusZ()))
                     .append(" MAD).\n");
         }
 
-        // Intensity-outlier context: name the divergent channel and its brightness.
-        if ((flags.contains(PixelCohortReport.INTENSITY_OUTLIER) || notable(maxIntensitySignedZ))
-                && maxIntensityChannel != null) {
-            double imgP99 = Double.NaN;
-            for (var cs : img.channels()) {
-                if (cs.channel().equals(maxIntensityChannel)) {
-                    imgP99 = cs.p99();
-                    break;
-                }
-            }
-            String direction = maxIntensitySignedZ >= 0 ? "brighter" : "dimmer";
-            sb.append("• ")
-                    .append(maxIntensityChannel)
-                    .append(" brightness (p99) ")
-                    .append(fmtNum(imgP99))
-                    .append(" is ")
-                    .append(direction)
-                    .append(" than the cohort (median ")
-                    .append(fmtNum(medP99))
-                    .append(", ")
-                    .append(fmtZ(maxIntensitySignedZ))
+        if (flags.contains(PixelCohortReport.INTENSITY_OUTLIER) || notable(r.brightnessShiftZ())) {
+            sb.append("• Overall brightness ")
+                    .append(fmtRatio(r.brightnessShift()))
+                    .append(" the cohort (median p99 ratio over ")
+                    .append(r.brightnessChannels())
+                    .append(" signal channels, ")
+                    .append(fmtZ(r.brightnessShiftZ()))
                     .append(" MAD).\n");
+        }
+
+        if (r.maxMarkerChannel() != null
+                && !Double.isNaN(r.maxMarkerZ())
+                && Math.abs(r.maxMarkerZ()) >= MARKER_NOTE_Z) {
+            double imgP99 = Double.NaN;
+            var cs = channelOf(img, r.maxMarkerChannel());
+            if (cs != null) {
+                imgP99 = cs.p99();
+            }
+            sb.append("• Most different marker: ")
+                    .append(r.maxMarkerChannel())
+                    .append(" p99 ")
+                    .append(fmtNum(imgP99))
+                    .append(" (cohort median ")
+                    .append(fmtNum(ctx.medP99ByChannel().getOrDefault(r.maxMarkerChannel(), Double.NaN)))
+                    .append(", ")
+                    .append(fmtZ(r.maxMarkerZ()))
+                    .append(" MAD on a log scale). Not flagged: one marker's brightness mostly reflects")
+                    .append(" which cells the image contains.\n");
         }
 
         if (flags.isEmpty()) {
             sb.append("• Pixel statistics are within the normal range for this project.\n");
         }
 
-        sb.append("Suggested action: ").append(suggestedAction(verdict, flags));
+        sb.append("Suggested action: ").append(suggestedAction(flags));
         return sb.toString();
     }
 
-    private static String suggestedAction(String verdict, List<String> flags) {
+    private static String suggestedAction(List<String> flags) {
         if (flags.isEmpty()) {
             return "include — looks normal.";
         }
         if (flags.contains(PixelCohortReport.BACKGROUND_HEAVY)) {
-            return "review / consider removing — mostly background.";
+            return "review / consider removing — little tissue.";
         }
         if (flags.contains(PixelCohortReport.SATURATED)) {
             return "review acquisition — channel(s) clipped/over-exposed.";
@@ -413,7 +506,7 @@ public final class PixelCohortAnalyzer {
             return "review staining/exposure — unusually flat signal.";
         }
         if (flags.contains(PixelCohortReport.INTENSITY_OUTLIER)) {
-            return "review / normalize — intensity differs from the cohort (may challenge ML).";
+            return "review staining/acquisition or normalise — the whole image is brighter or dimmer than the cohort.";
         }
         return "review — pixel statistics differ from the cohort.";
     }
@@ -515,6 +608,13 @@ public final class PixelCohortAnalyzer {
             return "n/a";
         }
         return String.format(Locale.ROOT, "%+.1f", z);
+    }
+
+    private static String fmtRatio(double v) {
+        if (Double.isNaN(v)) {
+            return "n/a";
+        }
+        return String.format(Locale.ROOT, "%.2f×", v);
     }
 
     private static String fmtNum(double v) {
