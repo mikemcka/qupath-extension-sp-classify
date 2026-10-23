@@ -25,6 +25,7 @@ import javafx.scene.control.ComboBox;
 import javafx.scene.control.Dialog;
 import javafx.scene.control.Hyperlink;
 import javafx.scene.control.Label;
+import javafx.scene.control.TextArea;
 import javafx.scene.control.TextField;
 import javafx.scene.layout.GridPane;
 import javafx.scene.layout.VBox;
@@ -38,6 +39,7 @@ import qupath.lib.io.GsonTools;
 import qupath.lib.objects.PathAnnotationObject;
 import qupath.lib.objects.PathDetectionObject;
 import qupath.lib.objects.PathObject;
+import qupath.lib.objects.PathObjectTools;
 import qupath.lib.projects.ProjectImageEntry;
 
 /**
@@ -537,6 +539,23 @@ final class UtilityScripts {
     }
 
     /**
+     * The delete confirmation: the column names go in a scrolling box of fixed height, so a long
+     * list cannot push the dialog's buttons off the screen.
+     */
+    private static VBox deleteConfirmContent(String question, List<String> columns) {
+        TextArea list = new TextArea(String.join("\n", columns));
+        list.setEditable(false);
+        list.setWrapText(false);
+        list.setPrefRowCount(Math.min(columns.size(), 15));
+        list.setPrefColumnCount(50);
+        Label questionLabel = new Label(question);
+        questionLabel.setWrapText(true);
+        VBox box = new VBox(8, questionLabel, list, new Label("This cannot be undone."));
+        box.setPadding(new Insets(4));
+        return box;
+    }
+
+    /**
      * Delete detection measurements whose name contains a keyword (case-insensitive
      * by default), equivalent to the delete-measurements batch script. This is
      * destructive and not undoable, so the matching columns are previewed and
@@ -634,14 +653,18 @@ final class UtilityScripts {
             return;
         }
 
-        String columnList =
-                String.join("\n", preview.stream().map(s -> "  \u2022 " + s).toList());
         int imageCount = projectWide ? project.getImageList().size() : 1;
         String scopeText = projectWide ? ("all " + imageCount + " project image(s)") : "the current image";
         boolean confirmed = Dialogs.showConfirmDialog(
                 EXTENSION_NAME,
-                "Permanently delete these " + preview.size() + " measurement column(s) from " + scopeText + "?\n\n"
-                        + columnList + "\n\nThis cannot be undone.");
+                deleteConfirmContent(
+                        "Permanently delete these " + preview.size() + " measurement column(s) from " + scopeText
+                                + "?"
+                                + (projectWide
+                                        ? " The list is from " + previewImage + ". Columns on other images that"
+                                                + " contain the keyword are deleted too."
+                                        : ""),
+                        preview));
         if (!confirmed) return;
 
         // Current image only.
@@ -733,19 +756,16 @@ final class UtilityScripts {
      * Return the measurement names on the first detection that has any, matching
      * {@code keyword} as a substring (case-insensitive unless {@code caseSensitive}).
      */
-    private static List<String> matchingMeasurementNames(
+    /**
+     * Measurement names on any of {@code detections} that contain {@code keyword}. Read from every
+     * cell, as training discovers its features: some columns exist only on some cells (e.g.
+     * "Distance to other &lt;class&gt;" only on cells of that class), and reading one cell missed them.
+     */
+    static List<String> matchingMeasurementNames(
             Collection<PathObject> detections, String keyword, boolean caseSensitive) {
-        PathObject sample = null;
-        for (PathObject det : detections) {
-            if (!det.getMeasurementList().getNames().isEmpty()) {
-                sample = det;
-                break;
-            }
-        }
-        if (sample == null) return List.of();
         String needle = caseSensitive ? keyword : keyword.toLowerCase(java.util.Locale.ROOT);
         List<String> out = new ArrayList<>();
-        for (String name : sample.getMeasurementList().getNames()) {
+        for (String name : PathObjectTools.getAvailableFeatures(detections)) {
             String hay = caseSensitive ? name : name.toLowerCase(java.util.Locale.ROOT);
             if (hay.contains(needle)) out.add(name);
         }
@@ -756,8 +776,7 @@ final class UtilityScripts {
      * Remove every measurement matching {@code keyword} from each detection.
      * Returns the number of detections that had at least one measurement removed.
      */
-    private static int removeMeasurementsByKeyword(
-            Collection<PathObject> detections, String keyword, boolean caseSensitive) {
+    static int removeMeasurementsByKeyword(Collection<PathObject> detections, String keyword, boolean caseSensitive) {
         List<String> matches = matchingMeasurementNames(detections, keyword, caseSensitive);
         if (matches.isEmpty()) return 0;
         int touched = 0;
