@@ -236,8 +236,8 @@ public class ProjectStateManager {
         }
         state.model1Type = model1Type != null ? model1Type.name() : ModelType.XGBOOST.name();
         state.model2Type = model2Type != null ? model2Type.name() : ModelType.LIGHTGBM.name();
-        // Save feature selection and normalization
-        state.selectedFeatures = null; // to be set by caller
+        // The feature selection is saved by saveSelectedFeatures; keep it, or training clears it.
+        state.selectedFeatures = existing != null ? existing.selectedFeatures : null;
         state.featureTransforms = null; // to be set by caller
         state.arcsinhCofactor = null; // to be set by caller
 

@@ -487,8 +487,14 @@ public class SpClassifyExtension implements QuPathExtension, BinaryClassifierMan
                 // classifier-state.json on an image switch would clobber the binary session
                 // and surface multi-class imported rows under the binary classifier.
                 var state = (activeBinaryMarker == null) ? ProjectStateManager.loadState(project) : null;
+                // The project file is the source of truth for the feature selection (every change
+                // is saved), so a project without one must not inherit the previous project's.
+                if (activeBinaryMarker == null) {
+                    this.selectedFeatures = (state == null || state.selectedFeatures == null)
+                            ? null
+                            : new ArrayList<>(state.selectedFeatures);
+                }
                 if (state != null) {
-                    if (state.selectedFeatures != null) this.selectedFeatures = new ArrayList<>(state.selectedFeatures);
                     this.importedTrainingFeatureNames = ProjectStateManager.getImportedTrainingFeatureNames(state);
                     this.importedTrainingRows = ProjectStateManager.decodeImportedTrainingRows(state);
                     if (state.featureTransforms != null || state.arcsinhCofactor != null) {
