@@ -165,7 +165,8 @@ public class TrainingMetricsView {
         sb.append("scores on new images. Macro F1 averages the classes present in the set.\n");
         String roundSelection = m1Val != null ? m1Val.roundSelection() : null;
         if (roundSelection != null) {
-            sb.append(wrap(roundSelection, 72));
+            // One line per model's settings follows the round-selection sentence.
+            for (String line : roundSelection.split("\n")) sb.append(wrap(line, 72));
         } else if (m1Val != null) {
             sb.append(wrap(
                     "Saved by an earlier version, which chose the number of boosting rounds on these"

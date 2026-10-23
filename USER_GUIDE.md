@@ -366,6 +366,7 @@ Most users can leave these at their defaults.
 | **Pool labels from all images** | ✅ | recommended (always on in binary mode) | you want a model trained on the open image's labels only |
 | **Enable data balancing** + `SMOTE + Tomek` | ✅ | one class has many fewer labels than others | classes are already balanced, or you want to train on the labels as they are |
 | **Auto-tune hyperparameters** | ❌ | you can leave training running for several hours (see **Auto-tune** below) | you are still adding labels |
+| **Use last tuned parameters** | ❌ | you ran Auto-tune before and want the same settings without searching again (see **Auto-tune** below) | you changed the features, classes or labels a lot since the last Auto-tune run |
 | **Early stopping** | ✅ | recommended | you need a fixed number of rounds, e.g. to reproduce a published setting |
 | **Train/val metrics** | ✅ | you want the Training Metrics report | you are still adding labels (see below) |
 | **Show top 10 feature importance after training** | ✅ | recommended | you do not want the chart to open after training |
@@ -391,6 +392,10 @@ Use `SMOTE` alone if Tomek links removes too many labelled cells (the training l
 **Train/val metrics** produces the **Training Metrics** report (§5.6). It adds about a third to training time. It does not change the trained classifier unless **Auto-tune** is ticked: with metrics on, auto-tune uses only the training 80%, so the settings it chooses can differ. Untick it while you are still adding labels, and tick it again for your final run.
 
 **Auto-tune** tests different model settings and keeps the best settings for each model. It trains 2 × **Trials** × **CV folds** models. The defaults are 20 trials and 5 folds, which is 200 models. Trials can be set from 5 to 100 and CV folds from 2 to 10; these controls are shown when **Auto-tune hyperparameters** is ticked. With many features and classes this can take several hours. The training log shows the number of models before it starts. With **Train/val metrics** ticked, auto-tune uses only the training 80%, so the 20% in the Training Metrics report is not used to choose settings. Its scoring macro F1 averages only the classes present in each fold.
+
+Each Auto-tune run saves the best settings for each XGBoost or LightGBM model in the project: `celltune/classifier-state.json`, or `celltune/binary/<marker>.json` for a binary classifier. The saved record has the rounds, depth, learning rate (eta), subsample, colsample, the cross-validated macro F1, the trials, folds, number of labelled cells, features and classes, and the date. The training log also shows them.
+
+**Use last tuned parameters** trains each XGBoost or LightGBM model with the saved depth, learning rate, subsample and colsample instead of the defaults, and does not search again. It can be ticked only when **Auto-tune hyperparameters** is unticked and a saved result exists for a selected model type. Its tooltip lists the saved settings. With **Early stopping** ticked, the number of rounds is chosen again for these settings. With it unticked, the saved number of rounds is used. A model type without a saved result uses its defaults.
 
 **Model 1 and Model 2.** The default is XGBoost (Model 1) and LightGBM (Model 2). Random Forest is also available. Use two different model types: review mode depends on the two models disagreeing. Training refuses XGBoost + XGBoost and LightGBM + LightGBM, because the two slots would give identical predictions. Random Forest's confidence is the fraction of its trees that vote for the class. Training runs on the CPU only.
 
@@ -473,6 +478,7 @@ The line above the tables gives the number of labelled cells in the 80% and 20% 
 
 - **Macro F1** is the mean F1 over the classes that have cells in the set or are predicted in it. A class with neither is shown as `not in this set` and left out of the mean.
 - **How the round count was chosen** is shown above the tables. With early stopping on it was chosen on cells from the 80% only, so the 20% has not influenced the model. Metrics saved by an earlier version say so: those versions chose rounds on the 20%, so their scores can be slightly optimistic.
+- **The settings each model was trained with** (rounds, depth, eta, subsample, colsample; trees and depth for Random Forest) are listed after that, with where they came from: `defaults`, `auto-tuned this run`, or `last tuned <date>`.
 - **New images:** the 20% is drawn from the same images as the 80%, often from neighbouring cells. Expect lower scores on images with no labels.
 - **Small classes:** with SMOTE or ADASYN, classes with fewer than 6 labelled cells get a warning before training. Their synthetic cells are near-copies of the few labelled ones, and their validation scores rest on 1 or 2 cells.
 
@@ -1222,6 +1228,7 @@ Locks every annotation so it cannot be moved or edited by mistake. Choose **Curr
 | **Auto-tune hyperparameters** | ❌ | Searches for better model settings. Cost = 2 × Trials × CV folds model fits (200 at the defaults). This can take several hours on a panel with many features. With **Train/val metrics** ticked, it tunes on the training 80% only. Its scoring macro F1 averages only the classes present in each fold. |
 | **Trials** | 20 | Settings combinations tried per model (5–100). Shown only when Auto-tune is ticked. |
 | **CV folds** | 5 | Cross-validation folds used to score each combination (2–10). Shown only when Auto-tune is ticked. |
+| **Use last tuned parameters** | ❌ | Trains XGBoost and LightGBM with the settings saved by the last Auto-tune run, without searching again. Can be ticked only when Auto-tune is unticked and a result is saved for a selected model type. With **Early stopping** ticked, the number of rounds is chosen again. |
 | **Early stopping** | ✅ | Stops adding rounds when the class-weighted log-loss on held-out training cells has not improved for 20 rounds. Below 2,000 labelled cells the held-out cells are 5 cross-validation folds of the training 80%; above, a 10% inner split. XGBoost and LightGBM only; needs at least 20 labelled cells. The 20% validation set is never used. |
 | **Train/val metrics** | ✅ | Produces the **Training Metrics** report. Adds about a third to training time. Untick to train faster without the report. With **Auto-tune** ticked, it also restricts tuning to the training 80%. |
 | **Show top 10 feature importance after training** | ✅ | Opens the SHAP feature-importance plot after training. |

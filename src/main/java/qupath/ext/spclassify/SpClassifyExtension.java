@@ -285,6 +285,7 @@ public class SpClassifyExtension implements QuPathExtension, BinaryClassifierMan
                                 activeBinaryMarker,
                                 cls.getBatchCorrectionUsed(),
                                 cls.getBatchShiftsFingerprint());
+                        ProjectStateManager.saveTunedParams(proj, activeBinaryMarker, cls.getTunedParams());
                         logger.info("[SP Classify] Auto-saved binary classifier state for '{}'", activeBinaryMarker);
                     } catch (Exception ex) {
                         logger.warn(
@@ -527,6 +528,7 @@ public class SpClassifyExtension implements QuPathExtension, BinaryClassifierMan
                                     state.model2TrainMetrics, state.model2ValMetrics);
                             classifier.setBatchCorrectionRecord(
                                     state.batchCorrectionUsed, state.batchShiftsFingerprint);
+                            classifier.setTunedParams(state.tunedParams);
                             logger.info("[SP Classify] Restored trained classifier from saved state.");
                         }
                     }

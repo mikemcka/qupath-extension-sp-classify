@@ -18,6 +18,7 @@ import qupath.ext.spclassify.classifier.FeaturePruner;
 import qupath.ext.spclassify.classifier.HyperparameterTuner;
 import qupath.ext.spclassify.classifier.ModelType;
 import qupath.ext.spclassify.classifier.ResamplingStrategy;
+import qupath.ext.spclassify.classifier.TunedParams;
 import qupath.ext.spclassify.classifier.UncertaintySampler;
 import qupath.ext.spclassify.classifier.XGBoostModel;
 import qupath.ext.spclassify.io.GroundTruthIO;
@@ -97,6 +98,7 @@ public class ClassificationPanel extends VBox {
     private final ComboBox<ModelType> model1Combo = new ComboBox<>();
     private final ComboBox<ModelType> model2Combo = new ComboBox<>();
     private final CheckBox autoTuneCheckBox = new CheckBox("Auto-tune hyperparameters");
+    private final CheckBox useTunedCheckBox = new CheckBox("Use last tuned parameters");
     private final Spinner<Integer> tuneTrialsSpinner;
     private final Spinner<Integer> tuneFoldsSpinner;
     private final CheckBox earlyStopCheckBox = new CheckBox("Early stopping");
@@ -277,6 +279,13 @@ public class ClassificationPanel extends VBox {
         tuneRow.visibleProperty().bind(autoTuneCheckBox.selectedProperty());
         tuneRow.managedProperty().bind(autoTuneCheckBox.selectedProperty());
 
+        // Reuse the classifier's last auto-tune result instead of searching again. Only one of the
+        // two can apply to a run, and it needs a saved result for a model type in use.
+        autoTuneCheckBox.selectedProperty().addListener((obs, was, now) -> refreshUseTunedControl());
+        model1Combo.valueProperty().addListener((obs, was, now) -> refreshUseTunedControl());
+        model2Combo.valueProperty().addListener((obs, was, now) -> refreshUseTunedControl());
+        refreshUseTunedControl();
+
         computeMetricsCheckBox.setSelected(true);
         computeMetricsCheckBox.setTooltip(
                 new Tooltip("Train an extra evaluation copy of each model on an 80/20 split to produce the per-class\n"
@@ -387,6 +396,7 @@ public class ClassificationPanel extends VBox {
                         balancingRow,
                         autoTuneCheckBox,
                         tuneRow,
+                        useTunedCheckBox,
                         earlyStopCheckBox,
                         computeMetricsCheckBox,
                         showFeatureImportanceCheckBox,
@@ -489,6 +499,32 @@ public class ClassificationPanel extends VBox {
         // Re-enable the "Training Metrics" and "Feature Importance" buttons if the restored classifier has metrics.
         metricsButton.setDisable(cls == null || !cls.hasTrainValMetrics());
         featureImportanceButton.setDisable(cls == null || !cls.isTrained());
+        refreshUseTunedControl();
+    }
+
+    /**
+     * Enable "Use last tuned parameters" only when auto-tune is off and the classifier has a saved
+     * auto-tune result for a boosted model type selected; the tooltip lists the saved values.
+     */
+    private void refreshUseTunedControl() {
+        List<String> saved = new ArrayList<>();
+        if (classifier != null) {
+            for (ModelType t : new LinkedHashSet<>(Arrays.asList(model1Combo.getValue(), model2Combo.getValue()))) {
+                if (t == null || t == ModelType.RANDOM_FOREST) continue;
+                TunedParams p = classifier.getTunedParams(t);
+                if (p != null) saved.add(p.describe());
+            }
+        }
+        boolean usable = !saved.isEmpty() && !autoTuneCheckBox.isSelected();
+        if (!usable) useTunedCheckBox.setSelected(false);
+        useTunedCheckBox.setDisable(!usable);
+        useTunedCheckBox.setTooltip(new Tooltip(
+                saved.isEmpty()
+                        ? "Train with the settings found by the last auto-tune run instead of the defaults.\n\n"
+                                + "Not available: no auto-tune result is saved for the selected model types."
+                        : "Train with the settings found by the last auto-tune run instead of the defaults.\n"
+                                + "With early stopping on, the round count is measured again for these settings.\n\n"
+                                + String.join("\n", saved)));
     }
 
     /**
@@ -810,6 +846,7 @@ public class ClassificationPanel extends VBox {
         // Apply model types from combos
         classifier.setModel1Type(model1Combo.getValue());
         classifier.setModel2Type(model2Combo.getValue());
+        classifier.setUseTunedParams(useTunedCheckBox.isSelected() && !autoTuneCheckBox.isSelected());
 
         // Apply hyperparameters from spinners
         classifier.setNumRounds(roundsSpinner.getValue());
@@ -887,6 +924,8 @@ public class ClassificationPanel extends VBox {
                         ? "yes (" + tuneTrialsSpinner.getValue() + " trials x " + tuneFoldsSpinner.getValue()
                                 + " folds)"
                         : "no",
+                "Last tuned params",
+                useTunedCheckBox.isSelected() && !autoTuneCheckBox.isSelected(),
                 "Auto-prune",
                 autoPruneCheckBox.isSelected(),
                 "Pool images",
@@ -1196,6 +1235,11 @@ public class ClassificationPanel extends VBox {
                                     trainLog.accept(
                                             "WARN: could not save the batch-correction record: " + ex.getMessage());
                                 }
+                                try {
+                                    ProjectStateManager.saveTunedParams(projectRef, null, classifier.getTunedParams());
+                                } catch (Exception ex) {
+                                    trainLog.accept("WARN: could not save the tuned parameters: " + ex.getMessage());
+                                }
                             }
 
                             // Save per-image labels for cross-image pooling
@@ -1280,8 +1324,8 @@ public class ClassificationPanel extends VBox {
                                 doShowFeatureImportance();
                             }
 
-                            // Update spinners if auto-tuned
-                            // (Tuned params are now per-model; spinners retain user defaults)
+                            // An auto-tune run may have saved a new result to reuse.
+                            refreshUseTunedControl();
 
                             imageData.getHierarchy().fireHierarchyChangedEvent(this);
 

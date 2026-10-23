@@ -67,6 +67,19 @@ class TrainingMetricsViewTest {
     }
 
     @Test
+    void headerShowsEachModelsSettingsOnItsOwnLine() {
+        String header = TrainingMetricsView.header(
+                metrics(80, 80),
+                metrics(20, 20)
+                        .withRoundSelection("Round count chosen by 5-fold cross-validation.\n"
+                                + "Model 1 XGBOOST: 127 rounds, depth 4 (auto-tuned this run).\n"
+                                + "Model 2 RANDOM_FOREST: 100 trees, max depth 100."),
+                false);
+        assertTrue(header.contains("cross-validation.\nModel 1 XGBOOST: 127 rounds"), header);
+        assertTrue(header.contains("this run).\nModel 2 RANDOM_FOREST"), header);
+    }
+
+    @Test
     void headerFlagsMetricsFromEarlierVersions() {
         String header = TrainingMetricsView.header(metrics(80, 80), metrics(20, 20), false);
         assertTrue(header.contains("earlier version"), header);

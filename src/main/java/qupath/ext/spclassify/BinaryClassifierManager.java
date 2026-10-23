@@ -210,6 +210,7 @@ final class BinaryClassifierManager {
                         savedState.model1TrainMetrics, savedState.model1ValMetrics,
                         savedState.model2TrainMetrics, savedState.model2ValMetrics);
                 classifier.setBatchCorrectionRecord(savedState.batchCorrectionUsed, savedState.batchShiftsFingerprint);
+                classifier.setTunedParams(savedState.tunedParams);
                 host.setClassifier(classifier);
             }
         } catch (Exception ex) {
