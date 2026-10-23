@@ -39,6 +39,7 @@ import qupath.lib.io.GsonTools;
 import qupath.lib.objects.PathAnnotationObject;
 import qupath.lib.objects.PathDetectionObject;
 import qupath.lib.objects.PathObject;
+import qupath.lib.objects.PathObjectTools;
 import qupath.lib.projects.ProjectImageEntry;
 
 /**
@@ -657,7 +658,12 @@ final class UtilityScripts {
         boolean confirmed = Dialogs.showConfirmDialog(
                 EXTENSION_NAME,
                 deleteConfirmContent(
-                        "Permanently delete these " + preview.size() + " measurement column(s) from " + scopeText + "?",
+                        "Permanently delete these " + preview.size() + " measurement column(s) from " + scopeText
+                                + "?"
+                                + (projectWide
+                                        ? " The list is from " + previewImage + ". Columns on other images that"
+                                                + " contain the keyword are deleted too."
+                                        : ""),
                         preview));
         if (!confirmed) return;
 
@@ -750,19 +756,16 @@ final class UtilityScripts {
      * Return the measurement names on the first detection that has any, matching
      * {@code keyword} as a substring (case-insensitive unless {@code caseSensitive}).
      */
-    private static List<String> matchingMeasurementNames(
+    /**
+     * Measurement names on any of {@code detections} that contain {@code keyword}. Read from every
+     * cell, as training discovers its features: some columns exist only on some cells (e.g.
+     * "Distance to other &lt;class&gt;" only on cells of that class), and reading one cell missed them.
+     */
+    static List<String> matchingMeasurementNames(
             Collection<PathObject> detections, String keyword, boolean caseSensitive) {
-        PathObject sample = null;
-        for (PathObject det : detections) {
-            if (!det.getMeasurementList().getNames().isEmpty()) {
-                sample = det;
-                break;
-            }
-        }
-        if (sample == null) return List.of();
         String needle = caseSensitive ? keyword : keyword.toLowerCase(java.util.Locale.ROOT);
         List<String> out = new ArrayList<>();
-        for (String name : sample.getMeasurementList().getNames()) {
+        for (String name : PathObjectTools.getAvailableFeatures(detections)) {
             String hay = caseSensitive ? name : name.toLowerCase(java.util.Locale.ROOT);
             if (hay.contains(needle)) out.add(name);
         }
@@ -773,8 +776,7 @@ final class UtilityScripts {
      * Remove every measurement matching {@code keyword} from each detection.
      * Returns the number of detections that had at least one measurement removed.
      */
-    private static int removeMeasurementsByKeyword(
-            Collection<PathObject> detections, String keyword, boolean caseSensitive) {
+    static int removeMeasurementsByKeyword(Collection<PathObject> detections, String keyword, boolean caseSensitive) {
         List<String> matches = matchingMeasurementNames(detections, keyword, caseSensitive);
         if (matches.isEmpty()) return 0;
         int touched = 0;

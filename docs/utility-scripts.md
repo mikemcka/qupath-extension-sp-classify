@@ -16,7 +16,7 @@ Rebuilds parent/child relationships from object outlines, the same as the `resol
 
 > ⚠️ **Destructive and cannot be undone.** Check the keyword against your measurement names. A short keyword can match more columns than you intend.
 
-Removes every detection measurement whose name contains a keyword. Matching ignores case unless you tick **Case sensitive**. Choose **Current image** or **All project images**. Before deleting, the extension lists the matching columns and asks you to confirm. If nothing matches, nothing is deleted. With **All project images**, every image is saved (the open image first, the rest in the background).
+Removes every detection measurement whose name contains a keyword. Matching ignores case unless you tick **Case sensitive**. Choose **Current image** or **All project images**. Columns are matched on every cell, so a column that only some cells have is included (for example `Distance to other <class>`, which only cells of that class have). Before deleting, the extension lists the matching columns and asks you to confirm. With **All project images**, the list comes from the open image (or, if no image is open, the first image with cells), and matching columns on other images are deleted too. If nothing matches, nothing is deleted. With **All project images**, every image is saved (the open image first, the rest in the background).
 
 ### 13.4 Import GeoJSON Objects
 
