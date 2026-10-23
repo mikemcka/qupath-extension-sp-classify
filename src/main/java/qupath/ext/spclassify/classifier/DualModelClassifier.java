@@ -1,5 +1,7 @@
 package qupath.ext.spclassify.classifier;
 
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.*;
 import java.util.function.Consumer;
 import javafx.application.Platform;
@@ -46,6 +48,11 @@ public class DualModelClassifier {
     private int maxDepth = 6;
     private float eta = 0.1f;
     private float subsample = 0.8f;
+    private boolean useTunedParams;
+    // Last auto-tune result per boosted model type; kept across runs and saved with the state.
+    private final Map<ModelType, TunedParams> tunedParams = new EnumMap<>(ModelType.class);
+
+    private static final DateTimeFormatter TUNED_TIMESTAMP_FMT = DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss");
 
     /** Max cells per prediction chunk to stay within flat float[] int-index limit. */
     private static final int PREDICT_CHUNK_SIZE = 100_000;
@@ -441,6 +448,38 @@ public class DualModelClassifier {
         boolean mdl1Boosted = model1Type != ModelType.RANDOM_FOREST;
         boolean mdl2Boosted = model2Type != ModelType.RANDOM_FOREST;
 
+        // Reuse the last auto-tune result. Applied before early stopping so the round count it
+        // measures is for these settings; the saved round count is used only if it does not run.
+        String mdl1Source = "defaults", mdl2Source = "defaults";
+        TunedParams reuse1 = null, reuse2 = null;
+        if (useTunedParams && !autoTune) {
+            if (mdl1Boosted) reuse1 = tunedParams.get(model1Type);
+            if (mdl2Boosted) reuse2 = tunedParams.get(model2Type);
+            for (ModelType t : List.of(model1Type, model2Type)) {
+                if (t == ModelType.RANDOM_FOREST) continue;
+                TunedParams p = tunedParams.get(t);
+                out.accept(
+                        p != null
+                                ? "Using last tuned parameters — " + p.describe()
+                                : "No saved tuned parameters for " + t + " — using its defaults.");
+            }
+            if (reuse1 != null) {
+                mdl1Depth = reuse1.maxDepth();
+                mdl1Eta = reuse1.eta();
+                mdl1Sub = reuse1.subsample();
+                mdl1Col = reuse1.colsample();
+                mdl1Source = "last tuned " + reuse1.timestamp();
+            }
+            if (reuse2 != null) {
+                mdl2Depth = reuse2.maxDepth();
+                mdl2Eta = reuse2.eta();
+                mdl2Sub = reuse2.subsample();
+                mdl2Col = reuse2.colsample();
+                mdl2Source = "last tuned " + reuse2.timestamp();
+            }
+        }
+        boolean roundsByEarlyStop = false;
+
         // The 80/20 split built here is the one the train/val metrics step reports on — same rows,
         // ratio, seed and resampling — so it is built at most once per run and shared. Stays null
         // when early stopping is off, in which case the metrics step builds its own.
@@ -470,6 +509,7 @@ public class DualModelClassifier {
             roundSelection = plan.description();
 
             if (!plan.folds().isEmpty()) {
+                roundsByEarlyStop = true;
                 timer.start("early stop: " + model1Type);
                 if (mdl1Boosted && model1Type == ModelType.XGBOOST) {
                     mdl1Rounds = XGBoostModel.cvBestRounds(
@@ -488,6 +528,11 @@ public class DualModelClassifier {
                             plan.folds(), nFeatures, nClasses, mdl2Rounds, mdl2Depth, mdl2Eta, mdl2Sub, patience, out);
                 }
             }
+        }
+
+        if (!roundsByEarlyStop) {
+            if (reuse1 != null) mdl1Rounds = reuse1.numRounds();
+            if (reuse2 != null) mdl2Rounds = reuse2.numRounds();
         }
 
         // ── 1c. Auto-tune hyperparameters if requested (boosted models only) ──
@@ -615,7 +660,69 @@ public class DualModelClassifier {
                 mdl2Sub = tuneResult.lgbParams().subsample();
                 mdl2Col = tuneResult.lgbParams().colsample();
             }
+
+            // Record the result for each boosted model in use. A score of 0 or less means the
+            // search fell back to defaults (too few cells, or no trial scored): nothing to keep.
+            String tunedAt = LocalDateTime.now().format(TUNED_TIMESTAMP_FMT);
+            for (ModelType t : List.of(model1Type, model2Type)) {
+                HyperparameterTuner.HyperParams p;
+                double score;
+                if (t == ModelType.XGBOOST) {
+                    p = tuneResult.xgbParams();
+                    score = tuneResult.xgbScore();
+                } else if (t == ModelType.LIGHTGBM) {
+                    p = tuneResult.lgbParams();
+                    score = tuneResult.lgbScore();
+                } else {
+                    continue;
+                }
+                if (score <= 0) {
+                    if (t == model1Type) mdl1Source = "auto-tune defaults (no usable score)";
+                    if (t == model2Type) mdl2Source = "auto-tune defaults (no usable score)";
+                    continue;
+                }
+                if (t == model1Type) mdl1Source = "auto-tuned this run";
+                if (t == model2Type) mdl2Source = "auto-tuned this run";
+                tunedParams.put(
+                        t,
+                        new TunedParams(
+                                t.name(),
+                                p.numRounds(),
+                                p.maxDepth(),
+                                p.eta(),
+                                p.subsample(),
+                                p.colsample(),
+                                score,
+                                tuneTrials,
+                                tuneFolds,
+                                nTune,
+                                nFeatures,
+                                nClasses,
+                                tunedAt));
+            }
         }
+        String settingsNote = settingsLine(
+                        "Model 1",
+                        model1Type,
+                        mdl1Rounds,
+                        mdl1Depth,
+                        mdl1Eta,
+                        mdl1Sub,
+                        mdl1Col,
+                        mdl1Source,
+                        roundsByEarlyStop)
+                + "\n"
+                + settingsLine(
+                        "Model 2",
+                        model2Type,
+                        mdl2Rounds,
+                        mdl2Depth,
+                        mdl2Eta,
+                        mdl2Sub,
+                        mdl2Col,
+                        mdl2Source,
+                        roundsByEarlyStop);
+        out.accept(settingsNote);
 
         // ── 1d. Resample full dataset if requested ──────────────────────────
         // Keep references to the pre-resampling data so the train/val metrics
@@ -670,7 +777,9 @@ public class DualModelClassifier {
                         out,
                         sharedFold,
                         roundSelection
-                                + (autoTune ? " Auto-tune chose the other settings using the training 80% only." : ""));
+                                + (autoTune ? " Auto-tune chose the other settings using the training 80% only." : "")
+                                + "\n"
+                                + settingsNote);
             } catch (Exception ex) {
                 logger.warn("Failed to compute training/validation metrics", ex);
                 out.accept("Note: train/val metrics computation failed: " + ex.getMessage());
@@ -1106,6 +1215,38 @@ public class DualModelClassifier {
         return model2Type;
     }
 
+    /**
+     * When true and auto-tune is off, the next run trains each boosted model with its
+     * {@link #getTunedParams(ModelType) last tuned parameters} instead of the defaults.
+     */
+    public void setUseTunedParams(boolean useTunedParams) {
+        this.useTunedParams = useTunedParams;
+    }
+
+    /** The last auto-tune result per boosted model type, in {@link ModelType} order. */
+    public List<TunedParams> getTunedParams() {
+        return List.copyOf(tunedParams.values());
+    }
+
+    /** The last auto-tune result for {@code type}, or null if it was never tuned. */
+    public TunedParams getTunedParams(ModelType type) {
+        return tunedParams.get(type);
+    }
+
+    /** Replace the saved auto-tune results (e.g. from saved state); null or empty clears them. */
+    public void setTunedParams(List<TunedParams> params) {
+        tunedParams.clear();
+        if (params == null) return;
+        for (TunedParams p : params) {
+            if (p == null || p.modelType() == null) continue;
+            try {
+                tunedParams.put(ModelType.valueOf(p.modelType()), p);
+            } catch (IllegalArgumentException ex) {
+                logger.warn("Ignoring tuned parameters for unknown model type '{}'", p.modelType());
+            }
+        }
+    }
+
     // ── Population set accessors ────────────────────────────────────────────────
 
     public PopulationSet getPredMDL1() {
@@ -1341,5 +1482,33 @@ public class DualModelClassifier {
 
     private static TrainingMetrics withNote(TrainingMetrics m, String roundSelection) {
         return m == null ? null : m.withRoundSelection(roundSelection);
+    }
+
+    /** The settings one model is trained with and where they came from, as one line. */
+    static String settingsLine(
+            String slot,
+            ModelType type,
+            int rounds,
+            int depth,
+            float eta,
+            float subsample,
+            float colsample,
+            String source,
+            boolean roundsByEarlyStop) {
+        if (type == ModelType.RANDOM_FOREST) {
+            return String.format(Locale.ROOT, "%s %s: %d trees, max depth %d.", slot, type, rounds, depth);
+        }
+        return String.format(
+                Locale.ROOT,
+                "%s %s: %d rounds%s, depth %d, eta %.4f, subsample %.2f, colsample %.2f (%s).",
+                slot,
+                type,
+                rounds,
+                roundsByEarlyStop ? " (early stopping)" : "",
+                depth,
+                eta,
+                subsample,
+                colsample,
+                source);
     }
 }

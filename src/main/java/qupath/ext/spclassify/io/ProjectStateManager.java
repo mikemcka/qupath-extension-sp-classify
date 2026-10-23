@@ -16,6 +16,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import qupath.ext.spclassify.classifier.ModelType;
 import qupath.ext.spclassify.classifier.TrainingMetrics;
+import qupath.ext.spclassify.classifier.TunedParams;
 import qupath.ext.spclassify.model.CellPrediction;
 import qupath.ext.spclassify.model.CellTypeTable;
 import qupath.ext.spclassify.model.LabelStore;
@@ -81,6 +82,8 @@ public class ProjectStateManager {
         // Batch correction at training time; null in states saved before it was recorded.
         public Boolean batchCorrectionUsed;
         public String batchShiftsFingerprint;
+        // Last auto-tune result per boosted model type; null in states saved before it was recorded.
+        public List<TunedParams> tunedParams;
     }
 
     /**
@@ -417,6 +420,32 @@ public class ProjectStateManager {
         if (state == null) return false;
         state.batchCorrectionUsed = used;
         state.batchShiftsFingerprint = fingerprint;
+        writeState(path, state);
+        return true;
+    }
+
+    /**
+     * Record the classifier's last auto-tune result in a saved classifier state. Called after the
+     * state file has been written.
+     *
+     * @param scope  the binary marker whose {@code binary/<marker>.json} to update, or null
+     *               for the multi-class {@code classifier-state.json}
+     * @param params one entry per tuned model type; null or empty clears the record
+     * @return true if the file existed and was updated
+     */
+    public static boolean saveTunedParams(Project<?> project, String scope, List<TunedParams> params)
+            throws IOException {
+        Path ctDir = getCellTuneDir(project);
+        Path path = (scope == null || scope.isBlank())
+                ? ctDir.resolve(STATE_FILENAME)
+                : ctDir.resolve("binary").resolve(scope + ".json");
+        if (!Files.exists(path)) {
+            logger.warn("Cannot save tuned parameters: no classifier state at {}", path);
+            return false;
+        }
+        SavedState state = GSON.fromJson(Files.readString(path, StandardCharsets.UTF_8), SavedState.class);
+        if (state == null) return false;
+        state.tunedParams = (params == null || params.isEmpty()) ? null : List.copyOf(params);
         writeState(path, state);
         return true;
     }
