@@ -25,6 +25,7 @@ import javafx.scene.control.ComboBox;
 import javafx.scene.control.Dialog;
 import javafx.scene.control.Hyperlink;
 import javafx.scene.control.Label;
+import javafx.scene.control.TextArea;
 import javafx.scene.control.TextField;
 import javafx.scene.layout.GridPane;
 import javafx.scene.layout.VBox;
@@ -537,6 +538,23 @@ final class UtilityScripts {
     }
 
     /**
+     * The delete confirmation: the column names go in a scrolling box of fixed height, so a long
+     * list cannot push the dialog's buttons off the screen.
+     */
+    private static VBox deleteConfirmContent(String question, List<String> columns) {
+        TextArea list = new TextArea(String.join("\n", columns));
+        list.setEditable(false);
+        list.setWrapText(false);
+        list.setPrefRowCount(Math.min(columns.size(), 15));
+        list.setPrefColumnCount(50);
+        Label questionLabel = new Label(question);
+        questionLabel.setWrapText(true);
+        VBox box = new VBox(8, questionLabel, list, new Label("This cannot be undone."));
+        box.setPadding(new Insets(4));
+        return box;
+    }
+
+    /**
      * Delete detection measurements whose name contains a keyword (case-insensitive
      * by default), equivalent to the delete-measurements batch script. This is
      * destructive and not undoable, so the matching columns are previewed and
@@ -634,14 +652,13 @@ final class UtilityScripts {
             return;
         }
 
-        String columnList =
-                String.join("\n", preview.stream().map(s -> "  \u2022 " + s).toList());
         int imageCount = projectWide ? project.getImageList().size() : 1;
         String scopeText = projectWide ? ("all " + imageCount + " project image(s)") : "the current image";
         boolean confirmed = Dialogs.showConfirmDialog(
                 EXTENSION_NAME,
-                "Permanently delete these " + preview.size() + " measurement column(s) from " + scopeText + "?\n\n"
-                        + columnList + "\n\nThis cannot be undone.");
+                deleteConfirmContent(
+                        "Permanently delete these " + preview.size() + " measurement column(s) from " + scopeText + "?",
+                        preview));
         if (!confirmed) return;
 
         // Current image only.
