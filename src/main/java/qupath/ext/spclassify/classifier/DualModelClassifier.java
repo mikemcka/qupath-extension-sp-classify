@@ -110,6 +110,9 @@ public class DualModelClassifier {
     private TrainingMetrics model1ValMetrics;
     private TrainingMetrics model2TrainMetrics;
     private TrainingMetrics model2ValMetrics;
+    // Averaged prediction of both models: the class applied to cells
+    private TrainingMetrics averageTrainMetrics;
+    private TrainingMetrics averageValMetrics;
 
     /**
      * The phase breakdown of the last (or in-flight) training run; may be null.
@@ -291,7 +294,7 @@ public class DualModelClassifier {
         rfModel1 = null;
         rfModel2 = null;
         predALL = null;
-        setTrainingMetrics(null, null, null, null);
+        setTrainingMetrics(null, null, null, null, null, null);
     }
 
     private void trainAndPredictImpl(
@@ -784,13 +787,15 @@ public class DualModelClassifier {
                 logger.warn("Failed to compute training/validation metrics", ex);
                 out.accept("Note: train/val metrics computation failed: " + ex.getMessage());
                 // Drop the previous run's metrics so they are not shown or saved with this model.
-                setTrainingMetrics(null, null, null, null);
+                setTrainingMetrics(null, null, null, null, null, null);
             }
         } else {
             this.model1TrainMetrics = null;
             this.model1ValMetrics = null;
             this.model2TrainMetrics = null;
             this.model2ValMetrics = null;
+            this.averageTrainMetrics = null;
+            this.averageValMetrics = null;
             out.accept(
                     computeMetrics
                             ? "Skipping train/val metrics (need \u2265 20 labelled samples)."
@@ -1395,23 +1400,47 @@ public class DualModelClassifier {
         return model2ValMetrics;
     }
 
+    /**
+     * @return per-class precision/recall/F1 of the averaged prediction (the class applied to cells) on
+     *     the 80% train portion (may be null, e.g. metrics saved by an earlier version).
+     */
+    public TrainingMetrics getAverageTrainMetrics() {
+        return averageTrainMetrics;
+    }
+    /**
+     * @return per-class precision/recall/F1 of the averaged prediction (the class applied to cells) on
+     *     the 20% held-out validation portion (may be null, e.g. metrics saved by an earlier version).
+     */
+    public TrainingMetrics getAverageValMetrics() {
+        return averageValMetrics;
+    }
+
     /** @return true if any train/val metrics are available. */
     public boolean hasTrainValMetrics() {
         return model1TrainMetrics != null
                 || model1ValMetrics != null
                 || model2TrainMetrics != null
-                || model2ValMetrics != null;
+                || model2ValMetrics != null
+                || averageTrainMetrics != null
+                || averageValMetrics != null;
     }
 
     /**
      * Restore previously-computed metrics (e.g. after loading a saved classifier state).
      */
     public void setTrainingMetrics(
-            TrainingMetrics m1Train, TrainingMetrics m1Val, TrainingMetrics m2Train, TrainingMetrics m2Val) {
+            TrainingMetrics m1Train,
+            TrainingMetrics m1Val,
+            TrainingMetrics m2Train,
+            TrainingMetrics m2Val,
+            TrainingMetrics avgTrain,
+            TrainingMetrics avgVal) {
         this.model1TrainMetrics = m1Train;
         this.model1ValMetrics = m1Val;
         this.model2TrainMetrics = m2Train;
         this.model2ValMetrics = m2Val;
+        this.averageTrainMetrics = avgTrain;
+        this.averageValMetrics = avgVal;
     }
 
     /**
@@ -1478,6 +1507,8 @@ public class DualModelClassifier {
         this.model1ValMetrics = withNote(result.model1Val(), roundSelection);
         this.model2TrainMetrics = result.model2Train();
         this.model2ValMetrics = withNote(result.model2Val(), roundSelection);
+        this.averageTrainMetrics = result.averageTrain();
+        this.averageValMetrics = withNote(result.averageVal(), roundSelection);
     }
 
     private static TrainingMetrics withNote(TrainingMetrics m, String roundSelection) {

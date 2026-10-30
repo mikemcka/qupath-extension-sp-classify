@@ -79,6 +79,9 @@ public class ProjectStateManager {
         public TrainingMetrics model1ValMetrics;
         public TrainingMetrics model2TrainMetrics;
         public TrainingMetrics model2ValMetrics;
+        // Averaged prediction (the class applied to cells); null in states saved before it was recorded.
+        public TrainingMetrics averageTrainMetrics;
+        public TrainingMetrics averageValMetrics;
         // Batch correction at training time; null in states saved before it was recorded.
         public Boolean batchCorrectionUsed;
         public String batchShiftsFingerprint;
@@ -374,7 +377,9 @@ public class ProjectStateManager {
             TrainingMetrics m1Train,
             TrainingMetrics m1Val,
             TrainingMetrics m2Train,
-            TrainingMetrics m2Val)
+            TrainingMetrics m2Val,
+            TrainingMetrics avgTrain,
+            TrainingMetrics avgVal)
             throws IOException {
         Path outPath = getCellTuneDir(project).resolve(STATE_FILENAME);
         if (!Files.exists(outPath)) {
@@ -394,6 +399,8 @@ public class ProjectStateManager {
         state.model1ValMetrics = m1Val;
         state.model2TrainMetrics = m2Train;
         state.model2ValMetrics = m2Val;
+        state.averageTrainMetrics = avgTrain;
+        state.averageValMetrics = avgVal;
         writeState(outPath, state);
         return true;
     }

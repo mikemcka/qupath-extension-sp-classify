@@ -525,7 +525,8 @@ public class SpClassifyExtension implements QuPathExtension, BinaryClassifierMan
                             classifier.loadFromState(classifierState);
                             classifier.setTrainingMetrics(
                                     state.model1TrainMetrics, state.model1ValMetrics,
-                                    state.model2TrainMetrics, state.model2ValMetrics);
+                                    state.model2TrainMetrics, state.model2ValMetrics,
+                                    state.averageTrainMetrics, state.averageValMetrics);
                             classifier.setBatchCorrectionRecord(
                                     state.batchCorrectionUsed, state.batchShiftsFingerprint);
                             classifier.setTunedParams(state.tunedParams);

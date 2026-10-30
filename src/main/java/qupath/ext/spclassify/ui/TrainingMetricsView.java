@@ -25,7 +25,8 @@ import qupath.ext.spclassify.classifier.TrainingMetrics;
 
 /**
  * Dialog showing per-class precision/recall/F1 (sklearn-style classification
- * report) for both models.
+ * report) for the averaged prediction of both models (the class applied to
+ * cells) and for each model alone.
  *
  * <p>By default only the held-out <em>Validation (20%)</em> blocks are shown,
  * since those are the only honest generalisation-quality numbers. The 80%
@@ -44,6 +45,8 @@ public class TrainingMetricsView {
     private final TrainingMetrics m1Val;
     private final TrainingMetrics m2Train;
     private final TrainingMetrics m2Val;
+    private final TrainingMetrics avgTrain;
+    private final TrainingMetrics avgVal;
     private final String model1Label;
     private final String model2Label;
 
@@ -53,16 +56,21 @@ public class TrainingMetricsView {
             TrainingMetrics m1Val,
             TrainingMetrics m2Train,
             TrainingMetrics m2Val) {
-        this(owner, m1Train, m1Val, m2Train, m2Val, null, null);
+        this(owner, m1Train, m1Val, m2Train, m2Val, null, null, null, null);
     }
 
-    /** As above, labelling each model with its actual type (default XGBoost / LightGBM when null). */
+    /**
+     * As above, plus the averaged-prediction metrics (null for metrics saved by an earlier
+     * version), labelling each model with its actual type (default XGBoost / LightGBM when null).
+     */
     public TrainingMetricsView(
             Stage owner,
             TrainingMetrics m1Train,
             TrainingMetrics m1Val,
             TrainingMetrics m2Train,
             TrainingMetrics m2Val,
+            TrainingMetrics avgTrain,
+            TrainingMetrics avgVal,
             ModelType model1Type,
             ModelType model2Type) {
         this.model1Label = ModelLabels.full(1, model1Type);
@@ -71,6 +79,8 @@ public class TrainingMetricsView {
         this.m1Val = m1Val;
         this.m2Train = m2Train;
         this.m2Val = m2Val;
+        this.avgTrain = avgTrain;
+        this.avgVal = avgVal;
 
         text.setEditable(false);
         text.setWrapText(false);
@@ -89,12 +99,20 @@ public class TrainingMetricsView {
         Button downloadBtn = new Button("Download CSV\u2026");
         downloadBtn.setOnAction(e -> exportCsv(owner));
 
-        // Validation confusion matrix for Model 1 \u2014 the held-out view.
+        // Validation confusion matrix of the averaged prediction (the class applied to cells).
+        // Metrics saved by an earlier version have no averaged prediction, so fall back to Model 1.
         // Shown side-by-side as absolute + row-normalised heatmaps.
-        Button cmBtn = new Button("Validation Confusion Matrix ("
-                + ModelLabels.orDefault(1, model1Type).getDisplayName() + ")\u2026");
-        cmBtn.setDisable(m1Val == null);
-        cmBtn.setOnAction(e -> new ValidationConfusionMatrixView(owner, model1Label, m1Val).show());
+        Button cmBtn;
+        if (avgVal != null) {
+            cmBtn = new Button("Validation Confusion Matrix (average of both models)\u2026");
+            cmBtn.setOnAction(
+                    e -> new ValidationConfusionMatrixView(owner, TrainingMetrics.AVERAGE_LABEL, avgVal).show());
+        } else {
+            cmBtn = new Button("Validation Confusion Matrix ("
+                    + ModelLabels.orDefault(1, model1Type).getDisplayName() + ")\u2026");
+            cmBtn.setDisable(m1Val == null);
+            cmBtn.setOnAction(e -> new ValidationConfusionMatrixView(owner, model1Label, m1Val).show());
+        }
 
         Button close = new Button("Close");
         close.setOnAction(e -> stage.close());
@@ -125,7 +143,10 @@ public class TrainingMetricsView {
     /** Rebuild the displayed text based on the train-rows checkbox state. */
     private void refresh(boolean includeTrain) {
         StringBuilder sb = new StringBuilder(header(m1Train, m1Val, includeTrain));
+        sb.append(appliedNote(avgVal != null));
 
+        if (includeTrain) appendBlock(sb, avgTrain);
+        appendBlock(sb, avgVal);
         if (includeTrain) appendBlock(sb, m1Train);
         appendBlock(sb, m1Val);
         if (includeTrain) appendBlock(sb, m2Train);
@@ -185,6 +206,24 @@ public class TrainingMetricsView {
         return sb.toString();
     }
 
+    /** Which prediction is applied to cells, and whether its scores are shown. */
+    static String appliedNote(boolean hasAverage) {
+        if (hasAverage) {
+            return wrap(
+                            "Cells are given the class with the highest mean probability of the two models."
+                                    + " The first table scores that prediction. The Model 1 and Model 2 tables"
+                                    + " score each model alone.",
+                            72)
+                    + '\n';
+        }
+        return wrap(
+                        "Cells are given the class with the highest mean probability of the two models."
+                                + " Saved by an earlier version, which did not score that prediction; the tables"
+                                + " score each model alone. Retrain to show it.",
+                        72)
+                + '\n';
+    }
+
     /** Word-wrap {@code text} to lines of at most {@code width} characters, each ending in a newline. */
     static String wrap(String text, int width) {
         StringBuilder out = new StringBuilder();
@@ -232,7 +271,7 @@ public class TrainingMetricsView {
      * {@code __macro_f1__}, {@code __weighted_f1__} so they're easy to filter
      * out in pandas/Excel.
      *
-     * <p>Always exports every block we have (Train + Val for both models) so
+     * <p>Always exports every block we have (Train + Val for the averaged prediction and both models) so
      * the downloaded file is a complete record regardless of the on-screen
      * filter.
      */
@@ -247,6 +286,8 @@ public class TrainingMetricsView {
         Path path = target.toPath();
         try (PrintWriter w = new PrintWriter(Files.newBufferedWriter(path))) {
             w.println("split,model,class,precision,recall,f1,support");
+            writeBlock(w, "Train", TrainingMetrics.AVERAGE_LABEL, avgTrain);
+            writeBlock(w, "Val", TrainingMetrics.AVERAGE_LABEL, avgVal);
             writeBlock(w, "Train", model1Label, m1Train);
             writeBlock(w, "Val", model1Label, m1Val);
             writeBlock(w, "Train", model2Label, m2Train);

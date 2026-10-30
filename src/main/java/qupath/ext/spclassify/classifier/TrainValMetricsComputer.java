@@ -7,8 +7,9 @@ import java.util.Random;
 import java.util.function.Consumer;
 
 /**
- * Computes per-class train/validation metrics for the two models on a fresh 80/20
- * stratified split of the real (pre-resampling) labelled data.
+ * Computes per-class train/validation metrics for the two models, and for their averaged
+ * prediction (the class applied to cells), on a fresh 80/20 stratified split of the real
+ * (pre-resampling) labelled data.
  * <p>
  * Extracted from {@code DualModelClassifier}. The models are supplied as injected
  * {@link ModelTrainer}/{@link ModelPredictor} callbacks, so the orchestration
@@ -36,14 +37,20 @@ final class TrainValMetricsComputer {
         float[][] predict(float[] flatData, int nSamples) throws Exception;
     }
 
-    /** The four metric sets; fields are null when the split was degenerate. */
+    /**
+     * The six metric sets; fields are null when the split was degenerate. {@code averageTrain} and
+     * {@code averageVal} score the class with the highest mean probability of the two models, which
+     * is the class applied to cells ({@code CellPrediction.avgLabel()}).
+     */
     record Result(
             TrainingMetrics model1Train,
             TrainingMetrics model1Val,
             TrainingMetrics model2Train,
-            TrainingMetrics model2Val) {
+            TrainingMetrics model2Val,
+            TrainingMetrics averageTrain,
+            TrainingMetrics averageVal) {
         static Result empty() {
-            return new Result(null, null, null, null);
+            return new Result(null, null, null, null, null, null);
         }
     }
 
@@ -153,7 +160,7 @@ final class TrainValMetricsComputer {
      * @param model2Name      label prefix for model-2 metrics
      * @param classNames      ordered class names
      * @param out             progress/log sink
-     * @return the four metric sets, or {@link Result#empty()} if the split was degenerate
+     * @return the six metric sets, or {@link Result#empty()} if the split was degenerate
      */
     static Result compute(
             List<float[]> realRows,
@@ -247,11 +254,39 @@ final class TrainValMetricsComputer {
         TrainingMetrics model2Val =
                 TrainingMetrics.compute(model2Name + " — Validation (20%)", classNames, evValLabels, m2ValProba);
 
-        out.accept(String.format(
-                "Macro F1: M1 train=%.3f val=%.3f | M2 train=%.3f val=%.3f",
-                model1Train.macroF1(), model1Val.macroF1(), model2Train.macroF1(), model2Val.macroF1()));
+        // ── Averaged prediction (applied to cells) ──────────────────────────
+        TrainingMetrics averageTrain = TrainingMetrics.compute(
+                TrainingMetrics.AVERAGE_LABEL + " — Train (80%)",
+                classNames,
+                evTrainLabels,
+                average(m1TrainProba, m2TrainProba),
+                realTrainCount);
+        TrainingMetrics averageVal = TrainingMetrics.compute(
+                TrainingMetrics.AVERAGE_LABEL + " — Validation (20%)",
+                classNames,
+                evValLabels,
+                average(m1ValProba, m2ValProba));
 
-        return new Result(model1Train, model1Val, model2Train, model2Val);
+        out.accept(String.format(
+                "Macro F1: M1 train=%.3f val=%.3f | M2 train=%.3f val=%.3f | Average (applied) train=%.3f val=%.3f",
+                model1Train.macroF1(),
+                model1Val.macroF1(),
+                model2Train.macroF1(),
+                model2Val.macroF1(),
+                averageTrain.macroF1(),
+                averageVal.macroF1()));
+
+        return new Result(model1Train, model1Val, model2Train, model2Val, averageTrain, averageVal);
+    }
+
+    /** Per-row, per-class mean of two probability matrices, as {@code CellPrediction.avgLabel()} uses. */
+    static float[][] average(float[][] a, float[][] b) {
+        float[][] out = new float[a.length][];
+        for (int i = 0; i < a.length; i++) {
+            out[i] = new float[a[i].length];
+            for (int c = 0; c < a[i].length; c++) out[i][c] = (a[i][c] + b[i][c]) / 2f;
+        }
+        return out;
     }
 
     /**

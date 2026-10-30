@@ -84,4 +84,16 @@ class TrainingMetricsViewTest {
         String header = TrainingMetricsView.header(metrics(80, 80), metrics(20, 20), false);
         assertTrue(header.contains("earlier version"), header);
     }
+
+    @Test
+    void appliedNoteSaysWhichPredictionIsApplied() {
+        // The note is word-wrapped; join the lines before matching phrases.
+        String withAverage = TrainingMetricsView.appliedNote(true).replace('\n', ' ');
+        assertTrue(withAverage.contains("highest mean probability of the two models"), withAverage);
+        assertTrue(withAverage.contains("The first table scores that prediction"), withAverage);
+
+        String older = TrainingMetricsView.appliedNote(false).replace('\n', ' ');
+        assertTrue(older.contains("earlier version"), older);
+        assertTrue(older.contains("Retrain"), older);
+    }
 }
