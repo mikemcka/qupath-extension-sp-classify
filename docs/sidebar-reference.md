@@ -26,7 +26,7 @@
 | **Manual Label Mode** | — | Opens the floating labelling toolbar. |
 | **Train** | — | Starts training. Needs at least 10 labelled cells: on the open image, in imported rows, and (with **Pool labels from all images** ticked) on other images. |
 | **Agreement Confusion Matrix** | (disabled) | Shows how often the two models agree, per class. Available after training. |
-| **Training Metrics** | (disabled) | Per-class precision, recall and F1 on a 20% held-out split. Available after training with **Train/val metrics** ticked and at least 20 labelled cells. |
+| **Training Metrics** | (disabled) | Per-class precision, recall and F1 on a 20% held-out split, for the averaged prediction of both models (the class applied to cells) and for each model alone. Available after training with **Train/val metrics** ticked and at least 20 labelled cells. |
 | **Feature Importance...** | (disabled) | SHAP top features per class. Available after training. |
 | **Enter Review Mode** | (disabled) | Samples cells where the two models disagree, for you to review. Available once predictions exist. |
 
