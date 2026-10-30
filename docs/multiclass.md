@@ -81,7 +81,7 @@ Each Auto-tune run saves the best settings for each XGBoost or LightGBM model in
 
 **Use last tuned parameters** trains each XGBoost or LightGBM model with the saved depth, learning rate, subsample and colsample instead of the defaults, and does not search again. It can be ticked only when **Auto-tune hyperparameters** is unticked and a saved result exists for a selected model type. Its tooltip lists the saved settings. With **Early stopping** ticked, the number of rounds is chosen again for these settings. With it unticked, the saved number of rounds is used. A model type without a saved result uses its defaults.
 
-**Model 1 and Model 2.** The default is XGBoost (Model 1) and LightGBM (Model 2). Random Forest is also available. Use two different model types: review mode depends on the two models disagreeing. Training refuses XGBoost + XGBoost and LightGBM + LightGBM, because the two slots would give identical predictions. Random Forest's confidence is the fraction of its trees that vote for the class. Training runs on the CPU only.
+**Model 1 and Model 2.** The default is XGBoost (Model 1) and LightGBM (Model 2). Random Forest is also available. Each cell is given the class with the highest mean probability of the two models. Use two different model types: review mode depends on the two models disagreeing. Training refuses XGBoost + XGBoost and LightGBM + LightGBM, because the two slots would give identical predictions. Random Forest's confidence is the fraction of its trees that vote for the class. Training runs on the CPU only.
 
 **Rounds / Max depth.** The defaults are 500 rounds (range 50–1000) and depth 6 (range 2–15).
 
@@ -142,7 +142,15 @@ The **Image:** selector at the top switches to another image's saved predictions
 
 #### Training Metrics (button)
 
-**Training Metrics** shows precision, recall, F1 and support (number of cells) for each class and each model. These are calculated on 20% of the labelled cells of each class, held back from training:
+**Training Metrics** shows precision, recall, F1 and support (number of cells) for each class. These are calculated on 20% of the labelled cells of each class, held back from training. There are three tables:
+
+1. **Average of both models (applied):** the class with the highest mean probability of Model 1 and Model 2. This is the class given to cells when the classifier is applied.
+2. **Model 1** alone.
+3. **Model 2** alone.
+
+Metrics saved by an earlier version have no table for the average. Retrain to show it.
+
+Example of one table:
 
 ```
 class            precision   recall      f1   support
@@ -168,12 +176,12 @@ The line above the tables gives the number of labelled cells in the 80% and 20% 
 
 ![Training metrics](doc_images/training_metrics.png)
 
-**Validation Confusion Matrix (XGBoost)…** (the name in brackets is Model 1's type) shows the true class (rows) against Model 1's predicted class (columns) for the same 20% of cells. It has two heatmaps: cell counts, and counts as a percentage of each row. The diagonal of the percentage heatmap is each class's recall.
+**Validation Confusion Matrix (average of both models)…** shows the true class (rows) against the averaged prediction (columns) for the same 20% of cells. For metrics saved by an earlier version, the button is **Validation Confusion Matrix (XGBoost)…** (Model 1's type) and shows Model 1's predictions. It has two heatmaps: cell counts, and counts as a percentage of each row. The diagonal of the percentage heatmap is each class's recall.
 
 ![Validation confusion matrix](doc_images/validation_confusion_matrix.png)
 
 **Exports:**
-- **Download CSV…** (Training Metrics window): long format `split,model,class,precision,recall,f1,support`. Summary rows have the class `__accuracy__`, `__macro_f1__` or `__weighted_f1__`, so you can filter them out in pandas or R. A class that is not in the set has support 0 and is not included in `__macro_f1__`.
+- **Download CSV…** (Training Metrics window): long format `split,model,class,precision,recall,f1,support`. The `model` column is `Average of both models (applied)`, `Model 1 (<type>)` or `Model 2 (<type>)`. Summary rows have the class `__accuracy__`, `__macro_f1__` or `__weighted_f1__`, so you can filter them out in pandas or R. A class that is not in the set has support 0 and is not included in `__macro_f1__`.
 - **Download PNG…** (Validation Confusion Matrix window): both heatmaps side by side. This window also has **Download CSV…**.
 
 > **A high F1 score does not mean the classifier works on new images.** The validation cells come from the same images as the training cells, so F1 overestimates performance on other images. To check, open a different image, apply the classifier, look at the results, and check the Project Prediction Summary (§[8](prediction-summary.md)). If predictions on an image look wrong, label some of its cells and retrain.

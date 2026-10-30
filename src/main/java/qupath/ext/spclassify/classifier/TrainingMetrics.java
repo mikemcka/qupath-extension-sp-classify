@@ -49,6 +49,12 @@ public record TrainingMetrics(
         String roundSelection) {
 
     /**
+     * Label of the metrics for the averaged prediction of both models: the class with the highest
+     * mean probability, which is the class applied to cells.
+     */
+    public static final String AVERAGE_LABEL = "Average of both models (applied)";
+
+    /**
      * Compute per-class metrics from raw probabilities.
      *
      * @param label       descriptive label for this metric block

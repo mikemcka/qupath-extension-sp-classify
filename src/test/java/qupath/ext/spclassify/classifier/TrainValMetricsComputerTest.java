@@ -168,4 +168,59 @@ class TrainValMetricsComputerTest {
         assertEquals(2, split[0].length, "each class contributes at least one train sample");
         assertEquals(0, split[1].length);
     }
+
+    /** Predictor giving {@code pTrue} to the class encoded in feature 0 and the rest to the other class. */
+    private static TrainValMetricsComputer.ModelPredictor predictorWithTrueProb(int nFeatures, float pTrue) {
+        return (data, n) -> {
+            float[][] out = new float[n][CLASSES.size()];
+            for (int i = 0; i < n; i++) {
+                int cls = (int) data[i * nFeatures];
+                out[i][cls] = pTrue;
+                out[i][1 - cls] = 1f - pTrue;
+            }
+            return out;
+        };
+    }
+
+    @Test
+    void averageMetricsScoreTheMeanProbabilityNotModel1() throws Exception {
+        List<Integer> labels = new ArrayList<>(List.of(0, 0, 0, 0, 0, 1, 1, 1, 1, 1));
+        List<float[]> rows = rowsEncoding(labels);
+        TrainValMetricsComputer.ModelTrainer trainer = (data, lbls, n) -> {};
+
+        // Model 1 is right with 0.55; Model 2 is wrong with 0.9. Mean for the true class is
+        // (0.55 + 0.1) / 2 = 0.325, so the applied (averaged) prediction is always wrong.
+        var result = TrainValMetricsComputer.compute(
+                rows,
+                labels,
+                labels.size(),
+                2,
+                2,
+                ResamplingStrategy.NONE,
+                trainer,
+                predictorWithTrueProb(2, 0.55f),
+                "Model 1 (XGBOOST)",
+                trainer,
+                predictorWithTrueProb(2, 0.1f),
+                "Model 2 (LIGHTGBM)",
+                CLASSES,
+                s -> {});
+
+        assertEquals(1.0, result.model1Val().accuracy(), EPS);
+        assertEquals(0.0, result.model2Val().accuracy(), EPS);
+        assertNotNull(result.averageTrain());
+        assertNotNull(result.averageVal());
+        assertEquals(0.0, result.averageVal().accuracy(), EPS);
+        assertEquals(0.0, result.averageTrain().accuracy(), EPS);
+        assertTrue(result.averageVal().label().startsWith(TrainingMetrics.AVERAGE_LABEL));
+    }
+
+    @Test
+    void averageIsThePerClassMean() {
+        float[][] a = {{0.2f, 0.8f}, {1f, 0f}};
+        float[][] b = {{0.6f, 0.4f}, {0f, 1f}};
+        float[][] avg = TrainValMetricsComputer.average(a, b);
+        assertArrayEquals(new float[] {0.4f, 0.6f}, avg[0], 1e-6f);
+        assertArrayEquals(new float[] {0.5f, 0.5f}, avg[1], 1e-6f);
+    }
 }

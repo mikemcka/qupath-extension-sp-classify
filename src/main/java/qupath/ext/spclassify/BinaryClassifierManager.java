@@ -208,7 +208,8 @@ final class BinaryClassifierManager {
                 classifier.loadFromState(cs);
                 classifier.setTrainingMetrics(
                         savedState.model1TrainMetrics, savedState.model1ValMetrics,
-                        savedState.model2TrainMetrics, savedState.model2ValMetrics);
+                        savedState.model2TrainMetrics, savedState.model2ValMetrics,
+                        savedState.averageTrainMetrics, savedState.averageValMetrics);
                 classifier.setBatchCorrectionRecord(savedState.batchCorrectionUsed, savedState.batchShiftsFingerprint);
                 classifier.setTunedParams(savedState.tunedParams);
                 host.setClassifier(classifier);

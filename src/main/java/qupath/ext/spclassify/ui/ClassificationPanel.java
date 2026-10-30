@@ -1220,7 +1220,9 @@ public class ClassificationPanel extends VBox {
                                             classifier.getModel1TrainMetrics(),
                                             classifier.getModel1ValMetrics(),
                                             classifier.getModel2TrainMetrics(),
-                                            classifier.getModel2ValMetrics());
+                                            classifier.getModel2ValMetrics(),
+                                            classifier.getAverageTrainMetrics(),
+                                            classifier.getAverageValMetrics());
                                 } catch (Exception ex) {
                                     System.err.println(
                                             "[SP Classify] Failed to persist training metrics: " + ex.getMessage());
@@ -1416,6 +1418,8 @@ public class ClassificationPanel extends VBox {
                         classifier.getModel1ValMetrics(),
                         classifier.getModel2TrainMetrics(),
                         classifier.getModel2ValMetrics(),
+                        classifier.getAverageTrainMetrics(),
+                        classifier.getAverageValMetrics(),
                         classifier.getModel1Type(),
                         classifier.getModel2Type())
                 .show();
