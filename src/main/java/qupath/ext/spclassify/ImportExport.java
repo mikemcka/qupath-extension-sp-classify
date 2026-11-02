@@ -43,6 +43,7 @@ import qupath.ext.spclassify.ui.CellTableExportPane;
 import qupath.ext.spclassify.ui.ImageSelectionPane;
 import qupath.fx.dialogs.Dialogs;
 import qupath.lib.gui.QuPathGUI;
+import qupath.lib.images.ImageData;
 import qupath.lib.objects.PathObject;
 import qupath.lib.objects.PathObjectFilter;
 import qupath.lib.projects.Project;
@@ -112,19 +113,155 @@ final class ImportExport {
             selectedImages = new ArrayList<>(allImageNames);
         }
 
-        // Column + polygon options — discover features from the current image so
-        // the user can choose which measurement columns to export (mirrors the
-        // Select Features dialog) and whether to include cell polygons.
+        // Column options. The column list is the union over EVERY selected image, not just the
+        // open one: one image can lack a class or an annotation that others have, and its
+        // distance columns would then be missing from every exported CSV.
         Collection<PathObject> currentCells = imageData.getHierarchy().getObjects(null, PathObject.class).stream()
                 .filter(PathObjectFilter.DETECTIONS_ALL)
                 .toList();
-        List<String> allCurrentFeatures = new ArrayList<>(CellFeatureExtractor.discoverFeatureNames(currentCells));
-        // Append string metadata keys (e.g. "CN Class", "… original class") so they
-        // can be selected as export columns. These are string-valued and never
-        // appear among the numeric measurement columns above.
-        for (String metaKey : CellFeatureExtractor.discoverMetadataKeys(currentCells)) {
-            if (!allCurrentFeatures.contains(metaKey)) allCurrentFeatures.add(metaKey);
+        List<String> currentNumeric = CellFeatureExtractor.discoverFeatureNames(currentCells);
+        List<String> currentMeta = CellFeatureExtractor.discoverMetadataKeys(currentCells);
+
+        List<String> otherImages = selectedImages.stream()
+                .filter(n -> !n.equals(currentImageNameFinal))
+                .toList();
+        if (project == null || otherImages.isEmpty()) {
+            List<String> columns = unionColumns(List.of(currentNumeric), List.of(currentMeta));
+            chooseColumnsAndExport(qupath, imageData, project, currentImageNameFinal, selectedImages, columns);
+            return;
         }
+        scanColumnsThenExport(
+                qupath,
+                imageData,
+                project,
+                currentImageNameFinal,
+                selectedImages,
+                otherImages,
+                currentNumeric,
+                currentMeta);
+    }
+
+    /**
+     * Read every other selected image once to collect its measurement names and metadata keys,
+     * then open the column dialog with the union. Runs off the FX thread behind a progress window.
+     */
+    private static void scanColumnsThenExport(
+            QuPathGUI qupath,
+            ImageData<BufferedImage> imageData,
+            Project<?> project,
+            String currentImageName,
+            List<String> selectedImages,
+            List<String> otherImages,
+            List<String> currentNumeric,
+            List<String> currentMeta) {
+        Stage scanStage = new Stage();
+        scanStage.setTitle("Reading Measurement Names");
+        scanStage.initOwner(qupath.getStage());
+        scanStage.initModality(Modality.NONE);
+        ProgressBar scanBar = new ProgressBar(0);
+        scanBar.setPrefWidth(Double.MAX_VALUE);
+        Label scanLabel = new Label("Reading measurement names from " + otherImages.size() + " other image(s)…");
+        scanLabel.setWrapText(true);
+        VBox scanRoot = new VBox(8, scanLabel, scanBar);
+        scanRoot.setPadding(new Insets(14));
+        scanStage.setScene(new Scene(scanRoot, 440, 110));
+        scanStage.setOnCloseRequest(e -> e.consume());
+        scanStage.show();
+
+        @SuppressWarnings("unchecked")
+        var typedProject = (Project<BufferedImage>) (Object) project;
+        Map<String, ProjectImageEntry<BufferedImage>> entriesByName = new LinkedHashMap<>();
+        for (var entry : typedProject.getImageList()) entriesByName.putIfAbsent(entry.getImageName(), entry);
+
+        Thread worker = new Thread(
+                () -> {
+                    int n = otherImages.size();
+                    List<List<String>> numeric = new ArrayList<>(Collections.nCopies(n, List.<String>of()));
+                    List<List<String>> meta = new ArrayList<>(Collections.nCopies(n, List.<String>of()));
+                    List<String> unreadable = Collections.synchronizedList(new ArrayList<>());
+                    AtomicInteger done = new AtomicInteger();
+                    ExecutorService pool = Executors.newFixedThreadPool(Math.min(n, 4));
+                    List<Callable<Void>> tasks = new ArrayList<>();
+                    for (int i = 0; i < n; i++) {
+                        final int idx = i;
+                        final String name = otherImages.get(i);
+                        tasks.add(() -> {
+                            try {
+                                var entry = entriesByName.get(name);
+                                var data = entry == null ? null : entry.readImageData();
+                                if (data == null) {
+                                    unreadable.add(name);
+                                } else {
+                                    var cells = data.getHierarchy().getObjects(null, PathObject.class).stream()
+                                            .filter(PathObjectFilter.DETECTIONS_ALL)
+                                            .toList();
+                                    numeric.set(idx, CellFeatureExtractor.discoverFeatureNames(cells));
+                                    meta.set(idx, CellFeatureExtractor.discoverMetadataKeys(cells));
+                                }
+                            } catch (Exception ex) {
+                                logger.warn("Could not read measurement names from '{}'", name, ex);
+                                unreadable.add(name);
+                            } finally {
+                                int d = done.incrementAndGet();
+                                Platform.runLater(() -> {
+                                    scanBar.setProgress((double) d / n);
+                                    scanLabel.setText("Reading measurement names: " + d + " / " + n + " image(s)");
+                                });
+                            }
+                            return null;
+                        });
+                    }
+                    try {
+                        pool.invokeAll(tasks);
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                    } finally {
+                        pool.shutdown();
+                    }
+
+                    List<List<String>> allNumeric = new ArrayList<>();
+                    allNumeric.add(currentNumeric);
+                    allNumeric.addAll(numeric);
+                    List<List<String>> allMeta = new ArrayList<>();
+                    allMeta.add(currentMeta);
+                    allMeta.addAll(meta);
+                    List<String> columns = unionColumns(allNumeric, allMeta);
+                    List<String> failed = new ArrayList<>(unreadable);
+                    Platform.runLater(() -> {
+                        scanStage.close();
+                        if (!failed.isEmpty()) {
+                            Dialogs.showWarningNotification(
+                                    EXTENSION_NAME,
+                                    "Could not read " + failed.size()
+                                            + " image(s) for column names; their own columns are not listed.");
+                        }
+                        chooseColumnsAndExport(qupath, imageData, project, currentImageName, selectedImages, columns);
+                    });
+                },
+                "SpClassify-ExportCellTable-Columns");
+        worker.setDaemon(true);
+        worker.start();
+    }
+
+    /**
+     * Union of per-image column names, first-seen order (the open image is passed first).
+     * Numeric measurements come first, then metadata keys that are not already numeric names.
+     */
+    static List<String> unionColumns(List<List<String>> numericPerImage, List<List<String>> metaPerImage) {
+        java.util.LinkedHashSet<String> numeric = new java.util.LinkedHashSet<>();
+        for (var names : numericPerImage) numeric.addAll(names);
+        java.util.LinkedHashSet<String> all = new java.util.LinkedHashSet<>(numeric);
+        for (var names : metaPerImage) all.addAll(names);
+        return new ArrayList<>(all);
+    }
+
+    private static void chooseColumnsAndExport(
+            QuPathGUI qupath,
+            ImageData<BufferedImage> imageData,
+            Project<?> project,
+            String currentImageNameFinal,
+            List<String> selectedImages,
+            List<String> allCurrentFeatures) {
         if (allCurrentFeatures.isEmpty()) {
             Dialogs.showErrorMessage(EXTENSION_NAME, "No cell measurements found to export.");
             return;
