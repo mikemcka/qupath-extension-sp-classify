@@ -79,9 +79,10 @@ final class TileEntryCleaner {
             }
             if (toRemove.isEmpty()) return;
             for (var entry : toRemove) {
-                // Capture the on-disk path before removal so we can force-delete
-                // it if QuPath's move-to-trash fallback fails (common on network
-                // mounts where no system trash is available).
+                // Remove the entry but delete its data folder ourselves. With
+                // removeAllData=true QuPath tries the system trash, which is
+                // unavailable on Linux, and logs "Unable to move ... to trash -
+                // please delete manually" even though the folder is then deleted.
                 java.nio.file.Path entryPath = null;
                 try {
                     entryPath = entry.getEntryPath();
@@ -89,20 +90,26 @@ final class TileEntryCleaner {
                 }
 
                 try {
-                    project.removeImage(entry, true);
-                    logger.info("Removed auto-added tile project entry: {}", entry.getImageName());
+                    project.removeImage(entry, false);
                 } catch (Exception ex) {
                     logger.warn(
                             "Failed to remove auto-added tile entry '{}': {}", entry.getImageName(), ex.getMessage());
+                    continue;
                 }
 
-                // Force-delete the data folder if QuPath left it behind.
-                if (entryPath != null && java.nio.file.Files.exists(entryPath)) {
+                if (entryPath != null && isInProjectDataFolder(project, entryPath)) {
                     try {
                         deleteRecursively(entryPath);
                     } catch (Exception ex) {
-                        logger.warn("Failed to force-delete tile entry path '{}': {}", entryPath, ex.getMessage());
+                        logger.debug("Deleting tile entry folder '{}' failed: {}", entryPath, ex.getMessage());
                     }
+                    if (java.nio.file.Files.exists(entryPath)) {
+                        logger.warn("Could not delete temporary review tile folder '{}'", entryPath);
+                    } else {
+                        logger.info("Removed temporary review tile entry and its folder '{}'", entryPath);
+                    }
+                } else {
+                    logger.info("Removed temporary review tile entry: {}", entry.getImageName());
                 }
             }
             try {
@@ -119,6 +126,20 @@ final class TileEntryCleaner {
             });
         } catch (Exception ex) {
             logger.warn("Failed to scan project for auto-added tile entries: {}", ex.getMessage());
+        }
+    }
+
+    /** True only for a direct child of the project's {@code data} folder, so nothing else is ever deleted. */
+    static boolean isInProjectDataFolder(qupath.lib.projects.Project<?> project, java.nio.file.Path entryPath) {
+        try {
+            var projectFile = project.getPath();
+            if (projectFile == null || projectFile.getParent() == null) return false;
+            var dataDir =
+                    projectFile.getParent().resolve("data").toAbsolutePath().normalize();
+            var p = entryPath.toAbsolutePath().normalize();
+            return dataDir.equals(p.getParent());
+        } catch (Exception ex) {
+            return false;
         }
     }
 
