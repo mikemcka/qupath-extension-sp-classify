@@ -50,10 +50,10 @@ public final class TrainingTileExtractor implements AutoCloseable {
 
     private static final Logger logger = LoggerFactory.getLogger(TrainingTileExtractor.class);
 
-    /** Total region size = bounding box * (1 + 2 * PADDING_FACTOR) → 8x bbox at PADDING_FACTOR=3.5. */
-    private static final double PADDING_FACTOR = 3.5;
+    /** Total region size = bounding box * (1 + 2 * PADDING_FACTOR) → 9.6x bbox at PADDING_FACTOR=4.3. */
+    private static final double PADDING_FACTOR = 4.3;
     /** Floor on tile size in pixels so tiny cells still get a usable view. */
-    private static final int MIN_TILE_PX = 96;
+    private static final int MIN_TILE_PX = 115;
 
     /** A single pre-extracted tile description, ready to display. */
     public static final class TilePrep {
