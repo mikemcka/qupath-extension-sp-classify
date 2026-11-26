@@ -63,6 +63,16 @@ public class ReviewController {
     /** Project entry that was open when the review session started; restored on close in tile mode. */
     private final ProjectImageEntry<BufferedImage> initialEntry;
     /**
+     * Viewer and in-memory ImageData shown when the session started. Tile mode puts this same
+     * object back on close instead of re-reading the entry from disk, which would drop any
+     * unsaved objects (e.g. a segmentation that was never saved).
+     */
+    private qupath.lib.gui.viewer.QuPathViewer initialViewer;
+
+    private qupath.lib.images.ImageData<BufferedImage> initialImageData;
+    /** Unsaved-changes flag of {@link #initialImageData} at session start (tile swaps clear it). */
+    private final boolean initialImageChanged;
+    /**
      * Removes the temporary project entries QuPath's ProjectBrowser auto-adds when
      * tile-mode review swaps a CroppedImageServer-backed ImageData into the viewer.
      * Snapshots the project's entries at construction (session start).
@@ -173,6 +183,9 @@ public class ReviewController {
             initial = qupath.getProject().getEntry(qupath.getImageData());
         }
         this.initialEntry = initial;
+        this.initialViewer = qupath.getViewer();
+        this.initialImageData = initialViewer == null ? null : initialViewer.getImageData();
+        this.initialImageChanged = initialImageData != null && initialImageData.isChanged();
 
         // Snapshot project entries BEFORE we touch the viewer, so the cleaner can
         // later identify any tile-derived entries QuPath's ProjectBrowser auto-added.
@@ -689,15 +702,37 @@ public class ReviewController {
                 } catch (Exception ignored) {
                 }
             }
-            try {
-                if (initialEntry != null) {
-                    qupath.openImageEntry(initialEntry);
+            // Put back the same in-memory ImageData, not a fresh read of the entry: the
+            // .qpdata on disk lacks anything the user had not saved (QuPath's viewer does
+            // not close an ImageData it swaps out, so this object is still intact).
+            // Only when the viewer still shows our tile — if the user opened another
+            // image meanwhile, leave it.
+            boolean restored = false;
+            if (initialViewer != null && initialImageData != null) {
+                var shown = initialViewer.getImageData();
+                if (shown == null || shown == oldTile) {
+                    try {
+                        initialViewer.setImageData(initialImageData);
+                        initialImageData.setChanged(initialImageChanged);
+                        restored = true;
+                    } catch (Exception ex) {
+                        logger.warn("Could not restore original image after tile review: {}", ex.getMessage());
+                    }
                 } else {
-                    var viewer = qupath.getViewer();
-                    if (viewer != null) viewer.resetImageData();
+                    restored = true;
                 }
-            } catch (Exception ex) {
-                logger.debug("Could not restore original image after tile review: {}", ex.getMessage());
+            }
+            if (!restored) {
+                try {
+                    if (initialEntry != null) {
+                        qupath.openImageEntry(initialEntry);
+                    } else {
+                        var viewer = qupath.getViewer();
+                        if (viewer != null) viewer.resetImageData();
+                    }
+                } catch (Exception ex) {
+                    logger.debug("Could not restore original image after tile review: {}", ex.getMessage());
+                }
             }
             if (oldTile != null) {
                 try {
@@ -712,6 +747,8 @@ public class ReviewController {
             // persisted.
             tileEntryCleaner.removeAutoAddedEntries();
         }
+        initialViewer = null;
+        initialImageData = null;
     }
 
     private ReviewItem getCurrentItem() {
